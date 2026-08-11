@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolEntry } from "../types";
 
-const toolModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
-vi.mock("@/tools/password-generator/Tool", toolModuleFactory);
+const passwordGeneratorModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
+const imageCropModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
+vi.mock("@/tools/password-generator/Tool", passwordGeneratorModuleFactory);
+vi.mock("@/tools/image-crop/Tool", imageCropModuleFactory);
 
 const {
   deriveCategoryGroups,
@@ -45,52 +47,72 @@ describe("deriveCategoryGroups", () => {
   });
 });
 
-describe("registry lookups (PR3: password-generator registered)", () => {
-  it("has exactly the password-generator entry", () => {
-    expect(TOOLS).toHaveLength(1);
-    expect(TOOLS[0].manifest.slug).toBe("password-generator");
-    expect(TOOLS[0].manifest.category).toBe("security");
+describe("registry lookups (PR5: image-crop registered alongside password-generator)", () => {
+  it("has exactly the image-crop and password-generator entries", () => {
+    expect(TOOLS).toHaveLength(2);
+    expect(TOOLS.map((entry) => entry.manifest.slug)).toEqual([
+      "image-crop",
+      "password-generator",
+    ]);
+    expect(TOOLS.find((entry) => entry.manifest.slug === "image-crop")?.manifest.category).toBe(
+      "image",
+    );
+    expect(
+      TOOLS.find((entry) => entry.manifest.slug === "password-generator")?.manifest.category,
+    ).toBe("security");
   });
 
-  it("resolves the password-generator entry and slug list", () => {
-    expect(getAllSlugs()).toEqual(["password-generator"]);
+  it("resolves each registered entry and the full slug list", () => {
+    expect(getAllSlugs()).toEqual(["image-crop", "password-generator"]);
+    expect(getToolBySlug("image-crop")?.manifest.slug).toBe("image-crop");
     expect(getToolBySlug("password-generator")?.manifest.slug).toBe("password-generator");
     expect(getToolBySlug("anything-else")).toBeUndefined();
   });
 
-  it("surfaces the security category now that it holds one tool", () => {
+  it("surfaces both categories now that each holds one tool", () => {
     const groups = getCategoryGroups();
 
-    expect(groups).toHaveLength(1);
-    expect(groups[0].category).toBe("security");
-    expect(groups[0].tools.map((entry) => entry.manifest.slug)).toEqual([
-      "password-generator",
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.category)).toEqual(["image", "security"]);
+    expect(groups.find((group) => group.category === "image")?.tools.map((e) => e.manifest.slug)).toEqual([
+      "image-crop",
     ]);
-    // image has zero registered tools in PR3, so it's absent by construction.
-    expect(groups.some((group) => group.category === "image")).toBe(false);
+    expect(
+      groups.find((group) => group.category === "security")?.tools.map((e) => e.manifest.slug),
+    ).toEqual(["password-generator"]);
   });
 
-  it("exposes a component for the registered slug via getToolComponent", () => {
+  it("exposes a component for each registered slug via getToolComponent", () => {
+    expect(getToolComponent("image-crop")).toBeDefined();
     expect(getToolComponent("password-generator")).toBeDefined();
     expect(getToolComponent("anything-else")).toBeUndefined();
   });
 });
 
 describe("code-splitting: chunk stays unfetched until its load() is called", () => {
-  it("never evaluates the tool's UI module merely by importing the registry", () => {
+  it("never evaluates a tool's UI module merely by importing the registry", () => {
     // Importing this test file (and tools-registry.ts) above already ran
-    // dynamic(entry.load) to build the component map — if that eagerly
-    // executed the underlying import(), the mocked module factory below
-    // would already have run by now.
-    expect(toolModuleFactory).not.toHaveBeenCalled();
+    // dynamic(entry.load) for every entry to build the component map — if
+    // that eagerly executed the underlying import(), the mocked module
+    // factories below would already have run by now.
+    expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
+    expect(imageCropModuleFactory).not.toHaveBeenCalled();
   });
 
-  it("only fetches the chunk once its load() is explicitly invoked", async () => {
-    const entry = getToolBySlug("password-generator");
-    expect(entry).toBeDefined();
+  it("only fetches a chunk once its own load() is explicitly invoked", async () => {
+    const passwordGeneratorEntry = getToolBySlug("password-generator");
+    const imageCropEntry = getToolBySlug("image-crop");
+    expect(passwordGeneratorEntry).toBeDefined();
+    expect(imageCropEntry).toBeDefined();
 
-    await entry?.load();
+    await imageCropEntry?.load();
 
-    expect(toolModuleFactory).toHaveBeenCalledTimes(1);
+    expect(imageCropModuleFactory).toHaveBeenCalledTimes(1);
+    // Fetching image-crop's chunk must not also fetch password-generator's.
+    expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
+
+    await passwordGeneratorEntry?.load();
+
+    expect(passwordGeneratorModuleFactory).toHaveBeenCalledTimes(1);
   });
 });

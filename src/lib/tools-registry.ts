@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
+import { imageCropManifest } from "@/tools/image-crop/manifest";
 import { passwordGeneratorManifest } from "@/tools/password-generator/manifest";
 import type { CategoryGroup, ToolCategory, ToolEntry } from "./types";
 
@@ -14,6 +15,10 @@ const CATEGORY_ORDER: ToolCategory[] = ["image", "security"];
 // Add one entry per tool folder here, loading its UI via a literal dynamic
 // import() path (see src/lib/types.ts).
 export const TOOLS: ToolEntry[] = [
+  {
+    manifest: imageCropManifest,
+    load: () => import("@/tools/image-crop/Tool"),
+  },
   {
     manifest: passwordGeneratorManifest,
     load: () => import("@/tools/password-generator/Tool"),

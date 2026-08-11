@@ -28,6 +28,9 @@ describe("ToolPage", () => {
 
 describe("generateStaticParams", () => {
   it("returns one entry per registered tool slug", () => {
-    expect(generateStaticParams()).toEqual([{ slug: "password-generator" }]);
+    expect(generateStaticParams()).toEqual([
+      { slug: "image-crop" },
+      { slug: "password-generator" },
+    ]);
   });
 });
