@@ -33,14 +33,32 @@ function mockObjectUrl() {
 
 function mockCanvasForCrop() {
   const drawImage = vi.fn();
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
-    { drawImage } as unknown as CanvasRenderingContext2D,
-  );
-  const toBlob = vi.fn((callback: (blob: Blob | null) => void) => callback(new Blob(["crop"])));
+  const save = vi.fn();
+  const restore = vi.fn();
+  const beginPath = vi.fn();
+  const ellipse = vi.fn();
+  const closePath = vi.fn();
+  const clip = vi.fn();
+  const roundRect = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage,
+    save,
+    restore,
+    beginPath,
+    ellipse,
+    closePath,
+    clip,
+    roundRect,
+  } as unknown as CanvasRenderingContext2D);
+  let lastMimeType: string | undefined;
+  const toBlob = vi.fn((callback: (blob: Blob | null) => void, type?: string) => {
+    lastMimeType = type;
+    callback(new Blob(["crop"], { type }));
+  });
   vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
     toBlob as unknown as HTMLCanvasElement["toBlob"],
   );
-  return { drawImage, toBlob };
+  return { drawImage, save, restore, ellipse, clip, toBlob, getLastMimeType: () => lastMimeType };
 }
 
 function mockAnchorClick() {
@@ -55,7 +73,7 @@ function mockAnchorClick() {
 }
 
 async function selectImageFile() {
-  const input = screen.getByLabelText("Image") as HTMLInputElement;
+  const input = screen.getByLabelText("Choose image file") as HTMLInputElement;
   const file = new File(["fake-image-bytes"], "photo.png", { type: "image/png" });
   fireEvent.change(input, { target: { files: [file] } });
   await waitFor(() => {
@@ -78,7 +96,7 @@ describe("ImageCropTool", () => {
   it("renders a file input and no crop UI before an image is chosen", () => {
     render(<ImageCropTool />);
 
-    expect(screen.getByLabelText("Image")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose image" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Download crop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Crop region" })).not.toBeInTheDocument();
   });
@@ -96,7 +114,8 @@ describe("ImageCropTool", () => {
     expect(group.style.top).toBe("10%");
     expect(group.style.width).toBe("80%");
     expect(group.style.height).toBe("80%");
-    expect(screen.getAllByRole("button", { name: /^Resize crop from/ })).toHaveLength(4);
+    expect(screen.getAllByRole("button", { name: /^Resize crop from/ })).toHaveLength(8);
+    expect(screen.getByText("Preview")).toBeInTheDocument();
   });
 
   it("dragging the move handle repositions the crop region (free rectangle, not a preset)", async () => {
@@ -163,9 +182,161 @@ describe("ImageCropTool", () => {
     const { default: FreshImageCropTool } = await import("../Tool");
     render(<FreshImageCropTool />);
 
-    expect((screen.getByLabelText("Image") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Choose image file") as HTMLInputElement).value).toBe("");
     expect(screen.queryByRole("group", { name: "Crop region" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Download crop" })).not.toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("shows aspect and shape preset controls once an image is selected", async () => {
+    mockObjectUrl();
+    render(<ImageCropTool />);
+    await selectImageFile();
+
+    expect(screen.getByRole("radio", { name: "Free" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "1:1 (square)" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "4:3" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "16:9" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "9:16" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Rectangle" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Circle" })).toBeInTheDocument();
+  });
+
+  it("selecting the 4:3 aspect preset reshapes the (initially square) crop region to that ratio (task 6.2)", async () => {
+    mockObjectUrl();
+    render(<ImageCropTool />);
+    await selectImageFile();
+
+    const group = screen.getByRole("group", { name: "Crop region" });
+    // Default free-crop box is square: 80% x 80%.
+    expect(group.style.width).toBe("80%");
+    expect(group.style.height).toBe("80%");
+
+    fireEvent.click(screen.getByRole("radio", { name: "4:3" }));
+
+    await waitFor(() => {
+      expect(group.style.width).toBe("80%");
+    });
+    const width = parseFloat(group.style.width);
+    const height = parseFloat(group.style.height);
+    expect(width / height).toBeCloseTo(4 / 3, 2);
+  });
+
+  it("switching back to 'free' after a preset removes the ratio constraint on further drags", async () => {
+    mockObjectUrl();
+    render(<ImageCropTool />);
+    await selectImageFile();
+
+    fireEvent.click(screen.getByRole("radio", { name: "1:1 (square)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Free" }));
+    expect(screen.getByRole("radio", { name: "Free" })).toBeChecked();
+
+    vi.spyOn(HTMLImageElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 100,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+
+    const group = screen.getByRole("group", { name: "Crop region" });
+    // A pure horizontal drag on the bottom-right corner would still be
+    // forced into a square if the ratio were still locked (see the
+    // "1:1 lock always yields a square" test in crop.test.ts) —
+    // asserting it isn't, by only moving the x2 edge.
+    fireEvent.pointerDown(screen.getByRole("button", { name: /^Resize crop from bottom-right/ }), {
+      clientX: 0,
+      clientY: 0,
+      pointerId: 1,
+    });
+    fireEvent.pointerMove(group, { clientX: 20, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(group, { clientX: 20, clientY: 0, pointerId: 1 });
+
+    await waitFor(() => {
+      const width = parseFloat(group.style.width);
+      const height = parseFloat(group.style.height);
+      expect(width / height).not.toBeCloseTo(1, 1);
+    });
+  });
+
+  it("selecting circle forces the aspect to 1:1 and disables every other aspect preset (task 6.3)", async () => {
+    mockObjectUrl();
+    render(<ImageCropTool />);
+    await selectImageFile();
+
+    fireEvent.click(screen.getByRole("radio", { name: "16:9" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Circle" }));
+
+    expect(screen.getByRole("radio", { name: "1:1 (square)" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Free" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "4:3" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "16:9" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "9:16" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "1:1 (square)" })).not.toBeDisabled();
+
+    const group = screen.getByRole("group", { name: "Crop region" });
+    const width = parseFloat(group.style.width);
+    const height = parseFloat(group.style.height);
+    expect(width).toBeCloseTo(height);
+  });
+
+  it("downloads a transparent-cornered PNG for a circle crop, clipping before drawing (task 6.6)", async () => {
+    mockObjectUrl();
+    const { ellipse, clip, getLastMimeType } = mockCanvasForCrop();
+    mockAnchorClick();
+    render(<ImageCropTool />);
+    await selectImageFile();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Circle" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download crop" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Downloaded.")).toBeInTheDocument();
+    });
+    expect(ellipse.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(clip.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(getLastMimeType()).toBe("image/png");
+  });
+
+  it("a rectangle crop with a non-free aspect preset still keeps the original file's format (task 6.6)", async () => {
+    mockObjectUrl();
+    const { getLastMimeType } = mockCanvasForCrop();
+    mockAnchorClick();
+    render(<ImageCropTool />);
+    await selectImageFile(); // photo.png
+
+    fireEvent.click(screen.getByRole("radio", { name: "16:9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download crop" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Downloaded.")).toBeInTheDocument();
+    });
+    expect(getLastMimeType()).toBe("image/png");
+  });
+
+  it("never writes to storage across every preset, and a reload leaves no trace of an undownloaded crop (task 6.7)", async () => {
+    mockObjectUrl();
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const { unmount } = render(<ImageCropTool />);
+
+    await selectImageFile();
+    fireEvent.click(screen.getByRole("radio", { name: "16:9" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Circle" }));
+    // Deliberately do not click Download — this crop is now unrecoverable.
+    expect(setItem).not.toHaveBeenCalled();
+
+    unmount();
+    vi.resetModules();
+    const { default: FreshImageCropTool } = await import("../Tool");
+    render(<FreshImageCropTool />);
+
+    expect((screen.getByLabelText("Choose image file") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("group", { name: "Crop region" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "Circle" })).not.toBeInTheDocument();
     expect(setItem).not.toHaveBeenCalled();
   });
 });

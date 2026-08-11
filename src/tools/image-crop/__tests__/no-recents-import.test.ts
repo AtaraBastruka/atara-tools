@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const imageCropDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const SOURCE_FILES = ["manifest.ts", "crop.ts", "Tool.tsx"];
+const SOURCE_FILES = ["manifest.ts", "crop.ts", "presets.ts", "Tool.tsx"];
 
 const IMPORT_SPECIFIER = /^\s*import\s+(?:[^;]*?\s+from\s+)?["']([^"']+)["']/gm;
 

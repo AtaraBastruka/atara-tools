@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyCropDrag,
   buildDownloadFileName,
+  constrainBoxToAspect,
   cropBoxToRegion,
   cropRegionToBlob,
   DEFAULT_CROP_BOX,
@@ -62,6 +63,102 @@ describe("applyCropDrag", () => {
     expect(next.x1).toBe(0);
     expect(next.y1).toBe(0);
   });
+
+  it("with no aspectRatio (default), 'move' is completely unaffected — same as free resize", () => {
+    const withoutRatio = applyCropDrag(box, "move", 0.1, -0.05);
+    const withNullRatio = applyCropDrag(box, "move", 0.1, -0.05, null);
+
+    expect(withNullRatio).toEqual(withoutRatio);
+  });
+});
+
+describe("applyCropDrag with a locked aspectRatio (PR6 aspect presets)", () => {
+  // A square starting box makes it obvious a locked ratio actually changed
+  // the shape, not just clamped an already-matching size.
+  const square: CropBox = { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.9 };
+
+  it("resizing a corner to a 4:3 ratio produces a box whose width/height is exactly 4/3", () => {
+    const next = applyCropDrag(square, "se", 0.1, 0, 4 / 3);
+
+    expect((next.x2 - next.x1) / (next.y2 - next.y1)).toBeCloseTo(4 / 3);
+    // Opposite corner (the anchor) stays exactly where it was.
+    expect(next.x1).toBeCloseTo(square.x1);
+    expect(next.y1).toBeCloseTo(square.y1);
+  });
+
+  it("keeps the locked ratio even when the drag is driven mostly by the vertical delta", () => {
+    const next = applyCropDrag(square, "se", 0, 0.1, 16 / 9);
+
+    expect((next.x2 - next.x1) / (next.y2 - next.y1)).toBeCloseTo(16 / 9);
+    expect(next.x1).toBeCloseTo(square.x1);
+    expect(next.y1).toBeCloseTo(square.y1);
+  });
+
+  it("keeps the ratio exact even when the ratio-derived size would overflow the image bounds", () => {
+    // se dragged far past the right/bottom edge — width/height must clamp to
+    // the image bounds while the ratio still holds exactly.
+    const next = applyCropDrag(square, "se", 10, 10, 9 / 16);
+
+    expect(next.x2).toBeLessThanOrEqual(1);
+    expect(next.y2).toBeLessThanOrEqual(1);
+    expect((next.x2 - next.x1) / (next.y2 - next.y1)).toBeCloseTo(9 / 16);
+  });
+
+  it("a 1:1 lock always yields a square regardless of which corner is dragged", () => {
+    for (const handle of ["nw", "ne", "sw", "se"] as const) {
+      const next = applyCropDrag(square, handle, 0.05, -0.02, 1);
+      expect(next.x2 - next.x1).toBeCloseTo(next.y2 - next.y1);
+    }
+  });
+
+  it("passing aspectRatio=null falls back to the original unconstrained free-resize behavior", () => {
+    const locked = applyCropDrag(square, "se", 0.1, 0.03, null);
+    const free = applyCropDrag(square, "se", 0.1, 0.03);
+
+    expect(locked).toEqual(free);
+  });
+
+  it("edge handles resize only one axis in free mode", () => {
+    const box: CropBox = { x1: 0.2, y1: 0.2, x2: 0.8, y2: 0.8 };
+
+    expect(applyCropDrag(box, "n", 0, -0.05)).toEqual({
+      x1: 0.2,
+      y1: 0.15,
+      x2: 0.8,
+      y2: 0.8,
+    });
+    expect(applyCropDrag(box, "e", 0.05, 0)).toEqual({
+      x1: 0.2,
+      y1: 0.2,
+      x2: 0.85,
+      y2: 0.8,
+    });
+  });
+});
+
+describe("constrainBoxToAspect", () => {
+  const square: CropBox = { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.9 };
+
+  it("returns the box unchanged when aspectRatio is null ('free' preset removes the constraint)", () => {
+    expect(constrainBoxToAspect(square, null)).toEqual(square);
+  });
+
+  it("reshapes a square box to a 4:3 ratio, anchored at its top-left corner", () => {
+    const next = constrainBoxToAspect(square, 4 / 3);
+
+    expect(next.x1).toBeCloseTo(square.x1);
+    expect(next.y1).toBeCloseTo(square.y1);
+    expect((next.x2 - next.x1) / (next.y2 - next.y1)).toBeCloseTo(4 / 3);
+  });
+
+  it("clamps the reshaped box within the image bounds when the ratio would otherwise overflow", () => {
+    const nearEdge: CropBox = { x1: 0.05, y1: 0.8, x2: 0.95, y2: 0.9 };
+    const next = constrainBoxToAspect(nearEdge, 1);
+
+    expect(next.x2).toBeLessThanOrEqual(1);
+    expect(next.y2).toBeLessThanOrEqual(1);
+    expect(next.x2 - next.x1).toBeCloseTo(next.y2 - next.y1);
+  });
 });
 
 describe("cropBoxToRegion", () => {
@@ -106,18 +203,39 @@ describe("buildDownloadFileName", () => {
 
 describe("cropRegionToBlob", () => {
   let drawImage: ReturnType<typeof vi.fn>;
+  let save: ReturnType<typeof vi.fn>;
+  let restore: ReturnType<typeof vi.fn>;
+  let beginPath: ReturnType<typeof vi.fn>;
+  let ellipse: ReturnType<typeof vi.fn>;
+  let closePath: ReturnType<typeof vi.fn>;
+  let clip: ReturnType<typeof vi.fn>;
   let toBlob: ReturnType<typeof vi.fn>;
+  let roundRect: ReturnType<typeof vi.fn>;
   let getContext: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     drawImage = vi.fn();
+    save = vi.fn();
+    restore = vi.fn();
+    beginPath = vi.fn();
+    ellipse = vi.fn();
+    closePath = vi.fn();
+    clip = vi.fn();
+    roundRect = vi.fn();
     // jsdom implements HTMLCanvasElement.getContext()/toBlob() as no-ops
     // that log "Not implemented" without installing the optional `canvas`
     // npm package, so both are mocked directly rather than relying on a
     // real 2D context.
-    getContext = vi
-      .spyOn(HTMLCanvasElement.prototype, "getContext")
-      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+    getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage,
+      save,
+      restore,
+      beginPath,
+      ellipse,
+      closePath,
+      clip,
+      roundRect,
+    } as unknown as CanvasRenderingContext2D);
     toBlob = vi.fn((callback: (blob: Blob | null) => void, type?: string) => {
       callback(new Blob(["crop"], { type: type ?? "image/png" }));
     });
@@ -156,6 +274,58 @@ describe("cropRegionToBlob", () => {
     await expect(
       cropRegionToBlob({} as CanvasImageSource, { x: 0, y: 0, width: 10, height: 10 }),
     ).rejects.toThrow(/did not produce a blob/);
+  });
+
+  it("rectangle path (default/explicit) never calls clip/ellipse — unchanged from PR5 (task 6.4)", async () => {
+    const region = { x: 0, y: 0, width: 40, height: 40 };
+
+    await cropRegionToBlob({} as CanvasImageSource, region, "image/jpeg", "rectangle");
+
+    expect(save).not.toHaveBeenCalled();
+    expect(ellipse).not.toHaveBeenCalled();
+    expect(clip).not.toHaveBeenCalled();
+    expect(restore).not.toHaveBeenCalled();
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg");
+  });
+
+  it("circle shape clips to an ellipse inscribed in the region before drawing, then restores", async () => {
+    const source = {} as CanvasImageSource;
+    const region = { x: 5, y: 5, width: 80, height: 80 };
+
+    await cropRegionToBlob(source, region, "image/png", "circle");
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(beginPath).toHaveBeenCalledTimes(1);
+    expect(ellipse).toHaveBeenCalledWith(40, 40, 40, 40, 0, 0, Math.PI * 2);
+    expect(closePath).toHaveBeenCalledTimes(1);
+    expect(clip).toHaveBeenCalledTimes(1);
+    // The clip must be established before the image is drawn, and released after.
+    const clipOrder = clip.mock.invocationCallOrder[0];
+    const drawOrder = drawImage.mock.invocationCallOrder[0];
+    const restoreOrder = restore.mock.invocationCallOrder[0];
+    expect(clipOrder).toBeLessThan(drawOrder);
+    expect(drawOrder).toBeLessThan(restoreOrder);
+  });
+
+  it("circle shape forces the output to image/png even when a different mimeType is passed (task 6.6)", async () => {
+    await cropRegionToBlob(
+      {} as CanvasImageSource,
+      { x: 0, y: 0, width: 20, height: 20 },
+      "image/jpeg",
+      "circle",
+    );
+
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/png");
+  });
+
+  it("rounded-rectangle clips with roundRect and exports PNG for transparent corners", async () => {
+    const region = { x: 0, y: 0, width: 200, height: 100 };
+
+    await cropRegionToBlob({} as CanvasImageSource, region, "image/jpeg", "rounded-rectangle");
+
+    expect(roundRect).toHaveBeenCalledWith(0, 0, 200, 100, 12);
+    expect(clip).toHaveBeenCalledTimes(1);
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/png");
   });
 });
 
