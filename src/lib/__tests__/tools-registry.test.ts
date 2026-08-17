@@ -3,8 +3,10 @@ import type { ToolEntry } from "../types";
 
 const passwordGeneratorModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 const imageCropModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
+const svgConvertModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 vi.mock("@/tools/password-generator/Tool", passwordGeneratorModuleFactory);
 vi.mock("@/tools/image-crop/Tool", imageCropModuleFactory);
+vi.mock("@/tools/svg-convert/Tool", svgConvertModuleFactory);
 
 const {
   deriveCategoryGroups,
@@ -47,14 +49,18 @@ describe("deriveCategoryGroups", () => {
   });
 });
 
-describe("registry lookups (PR5: image-crop registered alongside password-generator)", () => {
-  it("has exactly the image-crop and password-generator entries", () => {
-    expect(TOOLS).toHaveLength(2);
+describe("registry lookups", () => {
+  it("has image-crop, svg-convert, and password-generator entries", () => {
+    expect(TOOLS).toHaveLength(3);
     expect(TOOLS.map((entry) => entry.manifest.slug)).toEqual([
       "image-crop",
+      "svg-convert",
       "password-generator",
     ]);
     expect(TOOLS.find((entry) => entry.manifest.slug === "image-crop")?.manifest.category).toBe(
+      "image",
+    );
+    expect(TOOLS.find((entry) => entry.manifest.slug === "svg-convert")?.manifest.category).toBe(
       "image",
     );
     expect(
@@ -63,19 +69,21 @@ describe("registry lookups (PR5: image-crop registered alongside password-genera
   });
 
   it("resolves each registered entry and the full slug list", () => {
-    expect(getAllSlugs()).toEqual(["image-crop", "password-generator"]);
+    expect(getAllSlugs()).toEqual(["image-crop", "svg-convert", "password-generator"]);
     expect(getToolBySlug("image-crop")?.manifest.slug).toBe("image-crop");
+    expect(getToolBySlug("svg-convert")?.manifest.slug).toBe("svg-convert");
     expect(getToolBySlug("password-generator")?.manifest.slug).toBe("password-generator");
     expect(getToolBySlug("anything-else")).toBeUndefined();
   });
 
-  it("surfaces both categories now that each holds one tool", () => {
+  it("groups both image tools under Image, password-generator under Security", () => {
     const groups = getCategoryGroups();
 
     expect(groups).toHaveLength(2);
     expect(groups.map((group) => group.category)).toEqual(["image", "security"]);
     expect(groups.find((group) => group.category === "image")?.tools.map((e) => e.manifest.slug)).toEqual([
       "image-crop",
+      "svg-convert",
     ]);
     expect(
       groups.find((group) => group.category === "security")?.tools.map((e) => e.manifest.slug),
@@ -84,6 +92,7 @@ describe("registry lookups (PR5: image-crop registered alongside password-genera
 
   it("exposes a component for each registered slug via getToolComponent", () => {
     expect(getToolComponent("image-crop")).toBeDefined();
+    expect(getToolComponent("svg-convert")).toBeDefined();
     expect(getToolComponent("password-generator")).toBeDefined();
     expect(getToolComponent("anything-else")).toBeUndefined();
   });
@@ -97,18 +106,27 @@ describe("code-splitting: chunk stays unfetched until its load() is called", () 
     // factories below would already have run by now.
     expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
     expect(imageCropModuleFactory).not.toHaveBeenCalled();
+    expect(svgConvertModuleFactory).not.toHaveBeenCalled();
   });
 
   it("only fetches a chunk once its own load() is explicitly invoked", async () => {
     const passwordGeneratorEntry = getToolBySlug("password-generator");
     const imageCropEntry = getToolBySlug("image-crop");
+    const svgConvertEntry = getToolBySlug("svg-convert");
     expect(passwordGeneratorEntry).toBeDefined();
     expect(imageCropEntry).toBeDefined();
+    expect(svgConvertEntry).toBeDefined();
 
     await imageCropEntry?.load();
 
     expect(imageCropModuleFactory).toHaveBeenCalledTimes(1);
-    // Fetching image-crop's chunk must not also fetch password-generator's.
+    // Fetching image-crop's chunk must not also fetch the other tools'.
+    expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
+    expect(svgConvertModuleFactory).not.toHaveBeenCalled();
+
+    await svgConvertEntry?.load();
+
+    expect(svgConvertModuleFactory).toHaveBeenCalledTimes(1);
     expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
 
     await passwordGeneratorEntry?.load();

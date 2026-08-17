@@ -14,10 +14,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   // Boundary (spec: recents domain — "No other tool, including image crop,
-  // MUST write to recents"): image-crop must never import the
-  // generator-scoped recents module, even once that tool folder exists.
+  // MUST write to recents"): every tool except password-generator must
+  // never import the generator-scoped recents module.
   {
-    files: ["src/tools/image-crop/**/*.{ts,tsx}"],
+    files: ["src/tools/**/*.{ts,tsx}"],
+    ignores: ["src/tools/password-generator/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -26,7 +27,7 @@ const eslintConfig = defineConfig([
             {
               group: ["**/recents", "**/password-generator/*"],
               message:
-                "image-crop must never import password-generator/recents — image crop has zero history (see spec: recents domain).",
+                "Only password-generator may import recents — other tools have zero history (see spec: recents domain).",
             },
           ],
         },

@@ -30,6 +30,7 @@ describe("generateStaticParams", () => {
   it("returns one entry per registered tool slug", () => {
     expect(generateStaticParams()).toEqual([
       { slug: "image-crop" },
+      { slug: "svg-convert" },
       { slug: "password-generator" },
     ]);
   });

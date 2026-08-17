@@ -2,6 +2,7 @@ import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
 import { imageCropManifest } from "@/tools/image-crop/manifest";
 import { passwordGeneratorManifest } from "@/tools/password-generator/manifest";
+import { svgConvertManifest } from "@/tools/svg-convert/manifest";
 import type { CategoryGroup, ToolCategory, ToolEntry } from "./types";
 
 const CATEGORY_LABELS: Record<ToolCategory, string> = {
@@ -18,6 +19,10 @@ export const TOOLS: ToolEntry[] = [
   {
     manifest: imageCropManifest,
     load: () => import("@/tools/image-crop/Tool"),
+  },
+  {
+    manifest: svgConvertManifest,
+    load: () => import("@/tools/svg-convert/Tool"),
   },
   {
     manifest: passwordGeneratorManifest,

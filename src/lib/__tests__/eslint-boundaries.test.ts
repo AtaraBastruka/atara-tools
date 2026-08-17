@@ -11,7 +11,7 @@ export const usage = recentsStore;
  * convention — even though src/tools/image-crop/ doesn't exist until a
  * later PR, ESLint's flat-config `files` glob still applies once it does.
  */
-describe("image-crop must never import recents (spec: recents domain)", () => {
+describe("non-generator tools must never import recents (spec: recents domain)", () => {
   // Spinning up a real ESLint instance (flat config + eslint-config-next)
   // occasionally exceeds the default 5000ms timeout on a cold/loaded
   // machine even though the lint call itself is fast once ESLint's config
@@ -33,7 +33,23 @@ describe("image-crop must never import recents (spec: recents domain)", () => {
     15000,
   );
 
-  it("does not flag the same import pattern for files outside image-crop", async () => {
+  it(
+    "flags an import of the password-generator recents module from an svg-convert file",
+    async () => {
+      const eslint = new ESLint({ cwd: process.cwd() });
+      const [result] = await eslint.lintText(RECENTS_IMPORT, {
+        filePath: "src/tools/svg-convert/Tool.tsx",
+      });
+
+      const restrictedImportMessages = result.messages.filter(
+        (message) => message.ruleId === "no-restricted-imports",
+      );
+      expect(restrictedImportMessages.length).toBeGreaterThan(0);
+    },
+    15000,
+  );
+
+  it("does not flag the same import pattern for password-generator files", async () => {
     const eslint = new ESLint({ cwd: process.cwd() });
     const [result] = await eslint.lintText(RECENTS_IMPORT, {
       filePath: "src/tools/password-generator/other.ts",

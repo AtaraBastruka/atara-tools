@@ -1,8 +1,9 @@
 # Atara Tools
 
-A small, growing catalog of browser-based utilities — image cropping, secret
-generation, and more to come. Built with Next.js (App Router), TypeScript,
-and Tailwind CSS, and deployed as a static site.
+A small, growing catalog of browser-based utilities — image cropping, SVG
+to PNG/WebP conversion, secret generation, and more to come. Built with
+Next.js (App Router), TypeScript, and Tailwind CSS, and deployed as a
+static site.
 
 ## Privacy
 
