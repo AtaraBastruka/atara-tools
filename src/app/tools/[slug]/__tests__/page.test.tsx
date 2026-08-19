@@ -31,6 +31,7 @@ describe("generateStaticParams", () => {
     expect(generateStaticParams()).toEqual([
       { slug: "image-crop" },
       { slug: "svg-convert" },
+      { slug: "email-signature" },
       { slug: "password-generator" },
     ]);
   });

@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
+import { emailSignatureManifest } from "@/tools/email-signature/manifest";
 import { imageCropManifest } from "@/tools/image-crop/manifest";
 import { passwordGeneratorManifest } from "@/tools/password-generator/manifest";
 import { svgConvertManifest } from "@/tools/svg-convert/manifest";
@@ -7,10 +8,11 @@ import type { CategoryGroup, ToolCategory, ToolEntry } from "./types";
 
 const CATEGORY_LABELS: Record<ToolCategory, string> = {
   image: "Image",
+  content: "Content",
   security: "Security",
 };
 
-const CATEGORY_ORDER: ToolCategory[] = ["image", "security"];
+const CATEGORY_ORDER: ToolCategory[] = ["image", "content", "security"];
 
 // Single source of truth for the catalog, nav, and `/tools/[slug]` routes.
 // Add one entry per tool folder here, loading its UI via a literal dynamic
@@ -23,6 +25,10 @@ export const TOOLS: ToolEntry[] = [
   {
     manifest: svgConvertManifest,
     load: () => import("@/tools/svg-convert/Tool"),
+  },
+  {
+    manifest: emailSignatureManifest,
+    load: () => import("@/tools/email-signature/Tool"),
   },
   {
     manifest: passwordGeneratorManifest,

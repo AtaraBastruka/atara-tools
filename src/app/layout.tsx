@@ -39,8 +39,16 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
+    // suppressHydrationWarning is scoped to this one element's attributes
+    // on purpose: THEME_INIT_SCRIPT below runs beforeInteractive and sets
+    // data-theme on <html>, which the server never rendered. That is the
+    // whole point — it prevents a flash of the wrong theme — so React's
+    // mismatch warning here is noise, and it fires on every page once a
+    // theme override is stored. It does not suppress anything inside
+    // <body>; real mismatches in the app still surface.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

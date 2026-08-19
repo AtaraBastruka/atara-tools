@@ -4,9 +4,11 @@ import type { ToolEntry } from "../types";
 const passwordGeneratorModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 const imageCropModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 const svgConvertModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
+const emailSignatureModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 vi.mock("@/tools/password-generator/Tool", passwordGeneratorModuleFactory);
 vi.mock("@/tools/image-crop/Tool", imageCropModuleFactory);
 vi.mock("@/tools/svg-convert/Tool", svgConvertModuleFactory);
+vi.mock("@/tools/email-signature/Tool", emailSignatureModuleFactory);
 
 const {
   deriveCategoryGroups,
@@ -17,7 +19,7 @@ const {
   TOOLS,
 } = await import("../tools-registry");
 
-function makeEntry(slug: string, category: "image" | "security"): ToolEntry {
+function makeEntry(slug: string, category: "content" | "image" | "security"): ToolEntry {
   return {
     manifest: { slug, title: slug, description: `${slug} description`, category },
     load: () => Promise.resolve({ default: () => null }),
@@ -47,16 +49,30 @@ describe("deriveCategoryGroups", () => {
     expect(groups.map((group) => group.category)).toEqual(["image", "security"]);
     expect(groups.find((group) => group.category === "security")?.tools).toHaveLength(2);
   });
+
+  it("places content between image and security, matching the display order", () => {
+    const groups = deriveCategoryGroups([
+      makeEntry("password-generator", "security"),
+      makeEntry("email-signature", "content"),
+      makeEntry("image-crop", "image"),
+    ]);
+
+    expect(groups.map((group) => group.category)).toEqual(["image", "content", "security"]);
+  });
 });
 
 describe("registry lookups", () => {
-  it("has image-crop, svg-convert, and password-generator entries", () => {
-    expect(TOOLS).toHaveLength(3);
+  it("has image-crop, svg-convert, email-signature, and password-generator entries", () => {
+    expect(TOOLS).toHaveLength(4);
     expect(TOOLS.map((entry) => entry.manifest.slug)).toEqual([
       "image-crop",
       "svg-convert",
+      "email-signature",
       "password-generator",
     ]);
+    expect(TOOLS.find((entry) => entry.manifest.slug === "email-signature")?.manifest.category).toBe(
+      "content",
+    );
     expect(TOOLS.find((entry) => entry.manifest.slug === "image-crop")?.manifest.category).toBe(
       "image",
     );
@@ -69,18 +85,27 @@ describe("registry lookups", () => {
   });
 
   it("resolves each registered entry and the full slug list", () => {
-    expect(getAllSlugs()).toEqual(["image-crop", "svg-convert", "password-generator"]);
+    expect(getAllSlugs()).toEqual([
+      "image-crop",
+      "svg-convert",
+      "email-signature",
+      "password-generator",
+    ]);
+    expect(getToolBySlug("email-signature")?.manifest.slug).toBe("email-signature");
     expect(getToolBySlug("image-crop")?.manifest.slug).toBe("image-crop");
     expect(getToolBySlug("svg-convert")?.manifest.slug).toBe("svg-convert");
     expect(getToolBySlug("password-generator")?.manifest.slug).toBe("password-generator");
     expect(getToolBySlug("anything-else")).toBeUndefined();
   });
 
-  it("groups both image tools under Image, password-generator under Security", () => {
+  it("groups both image tools under Image, email-signature under Content, password-generator under Security", () => {
     const groups = getCategoryGroups();
 
-    expect(groups).toHaveLength(2);
-    expect(groups.map((group) => group.category)).toEqual(["image", "security"]);
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.category)).toEqual(["image", "content", "security"]);
+    expect(
+      groups.find((group) => group.category === "content")?.tools.map((e) => e.manifest.slug),
+    ).toEqual(["email-signature"]);
     expect(groups.find((group) => group.category === "image")?.tools.map((e) => e.manifest.slug)).toEqual([
       "image-crop",
       "svg-convert",
@@ -93,6 +118,7 @@ describe("registry lookups", () => {
   it("exposes a component for each registered slug via getToolComponent", () => {
     expect(getToolComponent("image-crop")).toBeDefined();
     expect(getToolComponent("svg-convert")).toBeDefined();
+    expect(getToolComponent("email-signature")).toBeDefined();
     expect(getToolComponent("password-generator")).toBeDefined();
     expect(getToolComponent("anything-else")).toBeUndefined();
   });
@@ -107,6 +133,7 @@ describe("code-splitting: chunk stays unfetched until its load() is called", () 
     expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
     expect(imageCropModuleFactory).not.toHaveBeenCalled();
     expect(svgConvertModuleFactory).not.toHaveBeenCalled();
+    expect(emailSignatureModuleFactory).not.toHaveBeenCalled();
   });
 
   it("only fetches a chunk once its own load() is explicitly invoked", async () => {
@@ -127,6 +154,11 @@ describe("code-splitting: chunk stays unfetched until its load() is called", () 
     await svgConvertEntry?.load();
 
     expect(svgConvertModuleFactory).toHaveBeenCalledTimes(1);
+    expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
+
+    await getToolBySlug("email-signature")?.load();
+
+    expect(emailSignatureModuleFactory).toHaveBeenCalledTimes(1);
     expect(passwordGeneratorModuleFactory).not.toHaveBeenCalled();
 
     await passwordGeneratorEntry?.load();

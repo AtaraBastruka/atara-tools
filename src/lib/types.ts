@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-export type ToolCategory = "image" | "security";
+export type ToolCategory = "content" | "image" | "security";
 
 export interface ToolManifest {
   slug: string;

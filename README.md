@@ -1,7 +1,8 @@
 # Atara Tools
 
 A small, growing catalog of browser-based utilities — image cropping, SVG
-to PNG/WebP conversion, secret generation, and more to come. Built with
+to PNG/WebP conversion, email signature building, secret generation, and
+more to come. Built with
 Next.js (App Router), TypeScript, and Tailwind CSS, and deployed as a
 static site.
 
@@ -49,6 +50,10 @@ Tools follow one explicit convention — no auto-discovery magic:
    user opens it).
 3. The tool's category appears in the catalog/nav automatically once it has
    at least one tool; categories with zero tools never render.
+4. Only if the tool needs a *new* category: add it to `ToolCategory` in
+   `src/lib/types.ts`, then to `CATEGORY_LABELS` and `CATEGORY_ORDER` in
+   the registry. The label map is a `Record<ToolCategory, string>`, so
+   TypeScript will point at anything you missed.
 
 That's it: **one new folder + one registry line** turns a tool on.
 

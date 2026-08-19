@@ -49,6 +49,22 @@ describe("non-generator tools must never import recents (spec: recents domain)",
     15000,
   );
 
+  it(
+    "flags an import of the password-generator recents module from an email-signature file",
+    async () => {
+      const eslint = new ESLint({ cwd: process.cwd() });
+      const [result] = await eslint.lintText(RECENTS_IMPORT, {
+        filePath: "src/tools/email-signature/Tool.tsx",
+      });
+
+      const restrictedImportMessages = result.messages.filter(
+        (message) => message.ruleId === "no-restricted-imports",
+      );
+      expect(restrictedImportMessages.length).toBeGreaterThan(0);
+    },
+    15000,
+  );
+
   it("does not flag the same import pattern for password-generator files", async () => {
     const eslint = new ESLint({ cwd: process.cwd() });
     const [result] = await eslint.lintText(RECENTS_IMPORT, {
