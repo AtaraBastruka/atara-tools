@@ -162,10 +162,10 @@ export default function PasswordGeneratorTool() {
       </div>
 
       <p className="text-xs text-foreground/50">
-        This generates a value locally in your browser — it never encrypts,
-        hashes, or transforms anything you type, because there&apos;s
-        nothing to type. It isn&apos;t a password vault, so copy your result
-        somewhere safe once you&apos;re happy with it.
+        This only generates a value — it never encrypts, hashes, or
+        transforms anything you type, because there&apos;s nothing to type.
+        It isn&apos;t a password vault, so copy your result somewhere safe
+        once you&apos;re happy with it.
       </p>
 
       <RecentsDialog

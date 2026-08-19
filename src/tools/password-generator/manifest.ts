@@ -4,6 +4,6 @@ export const passwordGeneratorManifest: ToolManifest = {
   slug: "password-generator",
   title: "Password Generator",
   description:
-    "Generate a random password or secret locally, with configurable length and character sets.",
+    "Generate a random password or secret with configurable length and character sets.",
   category: "security",
 };

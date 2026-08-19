@@ -580,7 +580,7 @@ export default function EmailSignatureTool() {
             ) : null}
           </div>
           <span className="text-xs text-foreground/55">
-            Read locally and never uploaded. Required for the PNG export.
+            Required for the PNG export.
           </span>
         </div>
 
@@ -636,10 +636,13 @@ export default function EmailSignatureTool() {
         ) : null}
       </section>
 
+      {/*
+        Only the part the footer does not already cover. "Nothing is
+        uploaded" is the site-wide promise; that reloading destroys work
+        you have not downloaded is specific to this tool.
+      */}
       <p className="text-xs text-foreground/50">
-        Everything happens locally in your browser: the logo is never uploaded,
-        and nothing you type — not even that you opened this tool — is stored
-        anywhere. Reloading the page clears the form with no way to recover it.
+        Reloading the page clears the form with no way to recover it.
       </p>
     </div>
   );

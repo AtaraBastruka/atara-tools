@@ -8,10 +8,14 @@ export default function Home() {
     <main className="flex flex-1 flex-col gap-10 px-6 py-16">
       <div className="mx-auto flex max-w-2xl flex-col items-center gap-4 text-center">
         <h1 className="text-3xl font-semibold tracking-tight">Atara Tools</h1>
+        {/*
+          The privacy promise lives in one place: the footer in AppShell.
+          It renders on every route, including a tool someone opens from a
+          shared link, so repeating it here only made the same claim twice
+          on one screen.
+        */}
         <p className="max-w-md text-base text-foreground/70">
-          A small, growing catalog of browser-based utilities. Everything
-          runs entirely on your device &mdash; nothing you use here ever
-          leaves your browser.
+          A small, growing catalog of browser-based utilities.
         </p>
       </div>
 

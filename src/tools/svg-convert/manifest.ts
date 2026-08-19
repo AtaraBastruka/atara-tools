@@ -4,6 +4,6 @@ export const svgConvertManifest: ToolManifest = {
   slug: "svg-convert",
   title: "SVG Convert",
   description:
-    "Turn a local SVG into a PNG or WebP and download the result. Nothing is uploaded, and nothing about the conversion is kept.",
+    "Turn a local SVG into a PNG or WebP at 1×, 2×, 4× or 8× and download the result.",
   category: "image",
 };
