@@ -137,6 +137,20 @@ describe("inline markup", () => {
     expect(html("`**not bold**`")).toContain("<code>**not bold**</code>");
   });
 
+  it("keeps bold wrapping around an inline code span", () => {
+    // Common in technical notes: the phrase is bold, a term inside it is code.
+    // Splitting on code first used to leave the asterisks visible in print.
+    expect(html("**No `portalCategory`.**")).toBe(
+      "<p><strong>No <code>portalCategory</code>.</strong></p>",
+    );
+    expect(html("1. **Reduced `calendarValues`.** rest")).toBe(
+      "<ol><li><strong>Reduced <code>calendarValues</code>.</strong> rest</li></ol>",
+    );
+    expect(html("** `featureContentRate: false` **")).toBe(
+      "<p><strong> <code>featureContentRate: false</code> </strong></p>",
+    );
+  });
+
   it("does not italicise snake_case identifiers", () => {
     const out = html("call some_function_name now");
     expect(out).not.toContain("<em>");

@@ -65,9 +65,14 @@ export function sanitizeUrl(raw: string, allowInlineImage = false): string | nul
 }
 
 // Inline code wins over every other inline rule: `**not bold**` inside a
-// code span must stay literal, so emphasis is only applied to the segments
-// between code spans.
+// code span must stay literal. Code spans are swapped for placeholders
+// before emphasis runs, so `**bold `code` still**` still wraps, while the
+// code's own asterisks never participate. Splitting the string and running
+// emphasis on each fragment instead would leave the opening `**` on one
+// side of the code span and the closing `**` on the other, which is how
+// `**No `portalCategory`.**` used to print with visible asterisks.
 const CODE_SPAN = /(`+)([\s\S]+?)\1/g;
+const CODE_SLOT = "\u0000";
 // Titles arrive as &quot; because the source was escaped before parsing.
 const IMAGE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g;
 const LINK = /\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g;
@@ -99,18 +104,18 @@ function renderEmphasis(text: string): string {
 
 /** Applies inline markup to text that has ALREADY been HTML-escaped. */
 export function renderInline(escaped: string): string {
-  let out = "";
-  let last = 0;
-  let match: RegExpExecArray | null;
+  const slots: string[] = [];
+  // Null bytes are never meaningful in Markdown; stripping them first means
+  // a source document cannot forge a placeholder that collides with ours.
+  const masked = escaped.replace(/\0/g, "").replace(CODE_SPAN, (_match, _ticks: string, content: string) => {
+    slots.push(`<code>${content.trim()}</code>`);
+    return `${CODE_SLOT}${slots.length - 1}${CODE_SLOT}`;
+  });
 
-  CODE_SPAN.lastIndex = 0;
-  while ((match = CODE_SPAN.exec(escaped)) !== null) {
-    out += renderEmphasis(escaped.slice(last, match.index));
-    out += `<code>${match[2].trim()}</code>`;
-    last = match.index + match[0].length;
-  }
-
-  return out + renderEmphasis(escaped.slice(last));
+  return renderEmphasis(masked).replace(
+    /\0(\d+)\0/g,
+    (_match, index: string) => slots[Number(index)] ?? "",
+  );
 }
 
 /** Escapes then applies inline markup. Every leaf goes through here. */
