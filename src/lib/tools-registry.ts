@@ -2,6 +2,7 @@ import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
 import { emailSignatureManifest } from "@/tools/email-signature/manifest";
 import { imageCropManifest } from "@/tools/image-crop/manifest";
+import { mdToPdfManifest } from "@/tools/md-to-pdf/manifest";
 import { passwordGeneratorManifest } from "@/tools/password-generator/manifest";
 import { svgConvertManifest } from "@/tools/svg-convert/manifest";
 import type { CategoryGroup, ToolCategory, ToolEntry } from "./types";
@@ -29,6 +30,10 @@ export const TOOLS: ToolEntry[] = [
   {
     manifest: emailSignatureManifest,
     load: () => import("@/tools/email-signature/Tool"),
+  },
+  {
+    manifest: mdToPdfManifest,
+    load: () => import("@/tools/md-to-pdf/Tool"),
   },
   {
     manifest: passwordGeneratorManifest,

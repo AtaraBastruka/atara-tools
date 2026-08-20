@@ -32,6 +32,7 @@ describe("generateStaticParams", () => {
       { slug: "image-crop" },
       { slug: "svg-convert" },
       { slug: "email-signature" },
+      { slug: "md-to-pdf" },
       { slug: "password-generator" },
     ]);
   });

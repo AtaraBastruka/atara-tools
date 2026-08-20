@@ -1,10 +1,9 @@
 # Atara Tools
 
 A small, growing catalog of browser-based utilities — image cropping, SVG
-to PNG/WebP conversion, email signature building, secret generation, and
-more to come. Built with
-Next.js (App Router), TypeScript, and Tailwind CSS, and deployed as a
-static site.
+to PNG/WebP conversion, email signature building, Markdown to PDF, secret
+generation, and more to come. Built with Next.js (App Router), TypeScript,
+and Tailwind CSS, and deployed as a static site.
 
 ## Privacy
 

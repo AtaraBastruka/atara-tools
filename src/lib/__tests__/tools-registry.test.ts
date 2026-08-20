@@ -5,10 +5,12 @@ const passwordGeneratorModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: 
 const imageCropModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 const svgConvertModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 const emailSignatureModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
+const mdToPdfModuleFactory = vi.hoisted(() => vi.fn(() => ({ default: () => null })));
 vi.mock("@/tools/password-generator/Tool", passwordGeneratorModuleFactory);
 vi.mock("@/tools/image-crop/Tool", imageCropModuleFactory);
 vi.mock("@/tools/svg-convert/Tool", svgConvertModuleFactory);
 vi.mock("@/tools/email-signature/Tool", emailSignatureModuleFactory);
+vi.mock("@/tools/md-to-pdf/Tool", mdToPdfModuleFactory);
 
 const {
   deriveCategoryGroups,
@@ -62,14 +64,18 @@ describe("deriveCategoryGroups", () => {
 });
 
 describe("registry lookups", () => {
-  it("has image-crop, svg-convert, email-signature, and password-generator entries", () => {
-    expect(TOOLS).toHaveLength(4);
+  it("has image-crop, svg-convert, email-signature, md-to-pdf, and password-generator entries", () => {
+    expect(TOOLS).toHaveLength(5);
     expect(TOOLS.map((entry) => entry.manifest.slug)).toEqual([
       "image-crop",
       "svg-convert",
       "email-signature",
+      "md-to-pdf",
       "password-generator",
     ]);
+    expect(TOOLS.find((entry) => entry.manifest.slug === "md-to-pdf")?.manifest.category).toBe(
+      "content",
+    );
     expect(TOOLS.find((entry) => entry.manifest.slug === "email-signature")?.manifest.category).toBe(
       "content",
     );
@@ -89,23 +95,25 @@ describe("registry lookups", () => {
       "image-crop",
       "svg-convert",
       "email-signature",
+      "md-to-pdf",
       "password-generator",
     ]);
     expect(getToolBySlug("email-signature")?.manifest.slug).toBe("email-signature");
     expect(getToolBySlug("image-crop")?.manifest.slug).toBe("image-crop");
     expect(getToolBySlug("svg-convert")?.manifest.slug).toBe("svg-convert");
+    expect(getToolBySlug("md-to-pdf")?.manifest.slug).toBe("md-to-pdf");
     expect(getToolBySlug("password-generator")?.manifest.slug).toBe("password-generator");
     expect(getToolBySlug("anything-else")).toBeUndefined();
   });
 
-  it("groups both image tools under Image, email-signature under Content, password-generator under Security", () => {
+  it("groups both image tools under Image, both document tools under Content, password-generator under Security", () => {
     const groups = getCategoryGroups();
 
     expect(groups).toHaveLength(3);
     expect(groups.map((group) => group.category)).toEqual(["image", "content", "security"]);
     expect(
       groups.find((group) => group.category === "content")?.tools.map((e) => e.manifest.slug),
-    ).toEqual(["email-signature"]);
+    ).toEqual(["email-signature", "md-to-pdf"]);
     expect(groups.find((group) => group.category === "image")?.tools.map((e) => e.manifest.slug)).toEqual([
       "image-crop",
       "svg-convert",
