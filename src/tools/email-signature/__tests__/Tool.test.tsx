@@ -174,12 +174,12 @@ describe("PNG-only options", () => {
     render(<EmailSignatureTool />);
     loadExample();
 
-    expect(screen.getByText(/2× exports at 2400px wide/)).toBeInTheDocument();
+    expect(screen.getByText(/2× exports at 1200px wide/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("3×"));
 
     await waitFor(() => {
-      expect(screen.getByText(/3× exports at 3600px wide/)).toBeInTheDocument();
+      expect(screen.getByText(/3× exports at 1800px wide/)).toBeInTheDocument();
     });
   });
 
@@ -197,6 +197,26 @@ describe("PNG-only options", () => {
     // This is the confusion the grouping exists to prevent: these two
     // controls genuinely do nothing to the pasteable HTML.
     expect(previewHtml()).toBe(before);
+  });
+});
+
+describe("logo width", () => {
+  it("reports the wider signature a big logo produces, in the hint and the PNG size", async () => {
+    render(<EmailSignatureTool />);
+    loadExample();
+
+    expect(screen.getByText(/2× exports at 1200px wide/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Hosted logo URL/), {
+      target: { value: "https://cdn.example.com/logo.png" },
+    });
+    fireEvent.change(screen.getByLabelText(/Logo width/), { target: { value: "330" } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/has widened to 760px/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/2× exports at 1520px wide/)).toBeInTheDocument();
+    expect(previewHtml()).toContain('width="330"');
   });
 });
 

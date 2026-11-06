@@ -3,6 +3,8 @@ import {
   BRAND_COLUMN_WIDTH,
   DETAILS_COLUMN_WIDTH,
   EXAMPLE_SIGNATURE,
+  MAX_LOGO_WIDTH,
+  MAX_SIGNATURE_WIDTH,
   METRICS,
   SIGNATURE_WIDTH,
   TYPE,
@@ -14,6 +16,9 @@ import {
   CARD_PADDING_X,
   computeSignatureLayout,
   OUTER_MARGIN,
+  signatureCanvasWidth,
+  wrapBalanced,
+  wrapText,
 } from "../render";
 
 function withData(overrides: Partial<SignatureData>): SignatureData {
@@ -55,13 +60,13 @@ describe("computeSignatureLayout", () => {
   it("scales the logo box from the real aspect ratio when one is known", () => {
     // Details stripped back so the brand column is what drives height —
     // otherwise the taller details column masks the logo's contribution.
-    const brandOnly = { logoWidth: 200, role: "", phone: "", email: "", address: "", links: "" };
+    const brandOnly = { logoWidth: 160, role: "", phone: "", email: "", address: "", links: "" };
     const wide = computeSignatureLayout(withData(brandOnly), 0.25);
     const tall = computeSignatureLayout(withData(brandOnly), 1);
 
-    expect(wide.logoWidth).toBe(200);
-    expect(wide.logoHeight).toBe(50);
-    expect(tall.logoHeight).toBe(200);
+    expect(wide.logoWidth).toBe(160);
+    expect(wide.logoHeight).toBe(40);
+    expect(tall.logoHeight).toBe(160);
     expect(tall.brandHeight).toBeGreaterThan(wide.brandHeight);
     expect(tall.height).toBeGreaterThan(wide.height);
   });
@@ -77,7 +82,58 @@ describe("computeSignatureLayout", () => {
   });
 
   it("clamps the logo width the same way the HTML export does", () => {
-    expect(computeSignatureLayout(withData({ logoWidth: 9999 }), 0.25).logoWidth).toBe(360);
+    expect(computeSignatureLayout(withData({ logoWidth: 9999 }), 0.25).logoWidth).toBe(MAX_LOGO_WIDTH);
+  });
+
+  it("widens the image for a big logo, moving the details but never squeezing them", () => {
+    const standard = computeSignatureLayout(EXAMPLE_SIGNATURE, 0.28);
+    const big = computeSignatureLayout(withData({ logoWidth: 9999 }), 0.28);
+    const growth = MAX_LOGO_WIDTH - BRAND_COLUMN_WIDTH;
+
+    expect(big.logoWidth).toBe(MAX_LOGO_WIDTH);
+    expect(big.width).toBe(MAX_SIGNATURE_WIDTH);
+    expect(big.cardWidth).toBe(MAX_SIGNATURE_WIDTH);
+    expect(big.detailsX).toBe(standard.detailsX + growth);
+    expect(big.dividerX).toBe(standard.dividerX + growth);
+    expect(big.detailsWidth).toBe(DETAILS_COLUMN_WIDTH);
+    // The logo stays centred in its column and clear of the divider.
+    expect(big.brandCenterX + big.logoWidth / 2).toBeLessThan(big.dividerX);
+  });
+
+  it("gives the tagline the extra room too, so it can stop wrapping", () => {
+    const tagline = "Design & Engineering Studio";
+    const standard = computeSignatureLayout(withData({ tagline }), 0.28);
+    const big = computeSignatureLayout(withData({ tagline, logoWidth: 9999 }), 0.28);
+
+    expect(standard.taglineLines.length).toBeGreaterThan(1);
+    expect(big.taglineLines).toHaveLength(1);
+  });
+
+  it("doesn't widen for a logo width when no logo is loaded", () => {
+    expect(computeSignatureLayout(withData({ logoWidth: 9999 }), null).width).toBe(SIGNATURE_WIDTH);
+  });
+
+  it("wraps long text and grows the card to hold it, since canvas won't wrap", () => {
+    const short = computeSignatureLayout(withData({ address: "Calle 50" }), 0.28);
+    const long = computeSignatureLayout(
+      withData({
+        address:
+          "Edificio Private Real State, Piso 12, Oficina 1204, Avenida Calle 50, Ciudad de Panamá",
+      }),
+      0.28,
+    );
+    const address = long.contactRows.flat().find((item) => item.label === "Address");
+
+    expect(address?.lines.length).toBeGreaterThan(1);
+    expect(long.height).toBeGreaterThan(short.height);
+  });
+
+  it("measures with whatever it is given, so the export can use the real font", () => {
+    const narrow = computeSignatureLayout(withData({ fullName: "Alex Rivera" }), 0.28, "boxed", () => 1);
+    const wide = computeSignatureLayout(withData({ fullName: "Alex Rivera" }), 0.28, "boxed", () => 9999);
+
+    expect(narrow.nameLines).toEqual(["Alex Rivera"]);
+    expect(wide.nameLines).toEqual(["Alex", "Rivera"]);
   });
 
   it("carries the same contacts and links the HTML export renders", () => {
@@ -95,8 +151,8 @@ describe("computeSignatureLayout", () => {
 describe("the PNG and the HTML share one scale", () => {
   it("draws the card at exactly the width the HTML renders at", () => {
     // The regression this guards: the canvas used to be a flat 1200px
-    // while the HTML rendered at 998px. Same font sizes on a wider
-    // canvas made every line except the name ~20% smaller in the export.
+    // while the HTML rendered narrower. Same font sizes on a wider canvas
+    // made every line except the name ~20% smaller in the export.
     const layout = computeSignatureLayout(EXAMPLE_SIGNATURE, 0.28, "boxed");
 
     expect(layout.cardWidth).toBe(SIGNATURE_WIDTH);
@@ -149,6 +205,40 @@ describe("bare mode geometry", () => {
   it("defaults to boxed when no mode is given", () => {
     expect(computeSignatureLayout(EXAMPLE_SIGNATURE, 0.28)).toEqual(
       computeSignatureLayout(EXAMPLE_SIGNATURE, 0.28, "boxed"),
+    );
+  });
+});
+
+describe("text wrapping", () => {
+  const perChar = (line: string) => line.length;
+
+  it("breaks on words and keeps everything", () => {
+    expect(wrapText("one two three", 7, perChar)).toEqual(["one two", "three"]);
+  });
+
+  it("gives an over-long word its own line instead of dropping or looping", () => {
+    expect(wrapText("a verylongword b", 4, perChar)).toEqual(["a", "verylongword", "b"]);
+  });
+
+  it("returns nothing for empty text, so empty fields take no height", () => {
+    expect(wrapText("   ", 100, perChar)).toEqual([]);
+    expect(wrapBalanced("", 100, perChar)).toEqual([]);
+  });
+
+  it("balances a wrapped tagline instead of orphaning its last word", () => {
+    const tagline = "AI - NATIVE SOFTWARE LAB";
+
+    expect(wrapText(tagline, 20, perChar)).toEqual(["AI - NATIVE SOFTWARE", "LAB"]);
+    expect(wrapBalanced(tagline, 20, perChar)).toEqual(["AI - NATIVE", "SOFTWARE LAB"]);
+  });
+});
+
+describe("image width", () => {
+  it("is exactly the HTML's width in both modes, with no margin eating into it", () => {
+    expect(signatureCanvasWidth("boxed")).toBe(SIGNATURE_WIDTH);
+    expect(signatureCanvasWidth("bare")).toBeLessThan(SIGNATURE_WIDTH);
+    expect(computeSignatureLayout(EXAMPLE_SIGNATURE, 0.28, "bare").width).toBe(
+      signatureCanvasWidth("bare"),
     );
   });
 });

@@ -61,12 +61,17 @@ export const DEFAULT_BACKGROUND = "#141a24";
 export const DEFAULT_ACCENT = "#6ea8fe";
 
 /**
- * Column widths in px. The signature comes out ~985px wide — wide for
- * email, but this is a desktop-first branded signature whose whole
- * character is the two-column split.
+ * Column widths in px, chosen so the signature starts at 600px wide: the
+ * width email actually gives it. Composers shrink anything wider to fit,
+ * and every font size shrinks with it. At the previous 998px a client
+ * showing the card at 555px turned the 11px labels into 6px ones. Designing
+ * at the display width means the sizes in TYPE are the sizes people read.
+ *
+ * The brand column is a minimum: see brandColumnWidth. The details column
+ * never changes, so a bigger logo can't squeeze the contact text.
  */
-export const BRAND_COLUMN_WIDTH = 280;
-export const DETAILS_COLUMN_WIDTH = 560;
+export const BRAND_COLUMN_WIDTH = 170;
+export const DETAILS_COLUMN_WIDTH = 340;
 /**
  * `boxed` paints the coloured card. `bare` drops the card entirely and
  * lets the signature sit directly on the email body — no fill, no
@@ -98,45 +103,50 @@ export type BareSurface = keyof typeof BARE_BACKDROPS;
  * holds because METRICS below keeps the two canvases the same width.
  */
 export const TYPE = {
-  name: { size: 31, line: 37, tracking: -0.5 },
-  role: { size: 13, line: 18, tracking: 2.4 },
-  company: { size: 30, line: 36, tracking: -0.6 },
-  tagline: { size: 11, line: 17, tracking: 2.6 },
+  name: { size: 24, line: 30, tracking: -0.3, weight: 700 },
+  role: { size: 12, line: 16, tracking: 1, weight: 600 },
+  company: { size: 22, line: 28, tracking: -0.3, weight: 700 },
+  tagline: { size: 11, line: 15, tracking: 0.8, weight: 500 },
   /** Small uppercase captions above each contact value. */
-  label: { size: 11, line: 13, tracking: 1.6 },
+  label: { size: 11, line: 14, tracking: 0.6, weight: 600 },
   /** Phone / email / address — the lines people actually have to read. */
-  value: { size: 15, line: 22 },
-  chip: { size: 13, line: 16 },
+  value: { size: 15, line: 21, tracking: 0, weight: 500 },
+  chip: { size: 13, line: 16, tracking: 0, weight: 500 },
 } as const;
+
+export type TypeStyle = keyof typeof TYPE;
 
 /** Card geometry, likewise shared so the two outputs stay the same size. */
 export const METRICS = {
-  cardPaddingX: 42,
-  cardPaddingY: 34,
-  cardRadius: 26,
+  cardPaddingX: 24,
+  cardPaddingY: 22,
+  cardRadius: 16,
   /** Gap between each column and the divider. */
-  columnGap: 36,
+  columnGap: 20,
   dividerWidth: 2,
-  labelGap: 6,
-  contactRowGap: 16,
-  contactGridGap: 28,
-  contactsGap: 22,
-  chipsGap: 20,
-  chipRowGap: 10,
-  chipPaddingX: 16,
-  chipPaddingY: 9,
-  chipRadius: 18,
-  roleGap: 8,
-  ruleWidth: 40,
-  ruleGapAbove: 16,
-  ruleGapBelow: 14,
-  taglineGap: 16,
+  labelGap: 2,
+  contactRowGap: 10,
+  contactGridGap: 16,
+  contactsGap: 14,
+  chipsGap: 14,
+  chipRowGap: 8,
+  chipPaddingX: 10,
+  chipPaddingY: 5,
+  chipRadius: 14,
+  /** Room the accent dot and its gap take up inside a chip. */
+  chipDotSpace: 14,
+  chipBorder: 1,
+  roleGap: 4,
+  ruleWidth: 28,
+  ruleGapAbove: 10,
+  ruleGapBelow: 9,
+  taglineGap: 10,
 } as const;
 
 /**
- * Rendered width of the whole signature in px. The PNG derives its
- * canvas from this so both outputs are the same size and one type scale
- * reads identically in each.
+ * Rendered width of the signature in px with a logo that fits the default
+ * brand column. The PNG derives its canvas from the same numbers so both
+ * outputs are the same size and one type scale reads identically in each.
  */
 export const SIGNATURE_WIDTH =
   METRICS.cardPaddingX * 2 +
@@ -145,9 +155,18 @@ export const SIGNATURE_WIDTH =
   METRICS.dividerWidth +
   DETAILS_COLUMN_WIDTH;
 
-export const MIN_LOGO_WIDTH = 80;
-export const MAX_LOGO_WIDTH = 360;
-export const DEFAULT_LOGO_WIDTH = 220;
+/**
+ * How far a big logo may widen the signature. Wider isn't free: the wider
+ * the image, the more a client fitting it to a column shrinks the text. At
+ * this limit, squeezing it back to 600px leaves the contact lines at about
+ * 12px, which is still readable.
+ */
+export const MAX_SIGNATURE_WIDTH = 760;
+
+export const MIN_LOGO_WIDTH = 60;
+export const MAX_LOGO_WIDTH = BRAND_COLUMN_WIDTH + MAX_SIGNATURE_WIDTH - SIGNATURE_WIDTH;
+/** Fills the default column: as big as a logo gets without adding width. */
+export const DEFAULT_LOGO_WIDTH = BRAND_COLUMN_WIDTH;
 
 /** A blank form. Every field is a placeholder in the UI, not a value. */
 export const EMPTY_SIGNATURE: SignatureData = {
@@ -290,8 +309,10 @@ export function derivePalette(background: string, accent: string): Palette {
     background: bg,
     accent: ac,
     text,
-    label: mixHex(bg, text, 0.5),
-    muted: mixHex(bg, text, 0.62),
+    // These two carry the smallest type on the card, so they sit well
+    // above the 4.5:1 floor: thin 11px text reads dimmer than its ratio.
+    label: mixHex(bg, text, 0.74),
+    muted: mixHex(bg, text, 0.8),
     divider: mixHex(bg, text, 0.16),
     surface: mixHex(bg, text, 0.09),
     surfaceBorder: mixHex(bg, text, 0.17),
@@ -400,6 +421,98 @@ export function deriveContactItems(data: SignatureData): ContactItem[] {
   return items;
 }
 
+/**
+ * Rough rendered width of `text`, for the one decision that has to be made
+ * without a browser: how the HTML's table rows are structured. It leans
+ * wide on purpose — wrongly deciding something won't fit just stacks it,
+ * while wrongly deciding it will fit makes it overflow.
+ */
+export function estimateTextWidth(text: string, style: TypeStyle): number {
+  const { size, tracking } = TYPE[style];
+  let width = 0;
+  for (const glyph of text) {
+    if (glyph === " ") width += 0.28;
+    else if (/[.,:;'|!ijlIft]/.test(glyph)) width += 0.33;
+    else if (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(glyph)) width += 1;
+    else if (/\p{Lu}/u.test(glyph)) width += 0.7;
+    else width += 0.58;
+    width += tracking / size;
+  }
+  return width * size;
+}
+
+const CONTACT_GRID_GAP = METRICS.contactGridGap;
+/** Narrower left column: phones are short, emails need the room. */
+export const CONTACT_COLUMN_WIDTHS = [
+  136,
+  DETAILS_COLUMN_WIDTH - 136 - CONTACT_GRID_GAP,
+] as const;
+
+function fitsContactColumn(item: ContactItem, column: 0 | 1): boolean {
+  return item.lines.every(
+    (line) => estimateTextWidth(line, "value") <= CONTACT_COLUMN_WIDTHS[column],
+  );
+}
+
+/**
+ * Groups contacts into rows: side by side where both fit their column, on
+ * a row of their own where they don't. A long email therefore gets the
+ * full width instead of overflowing the card. Both renderers use this, so
+ * the HTML and the PNG always agree on the structure.
+ */
+export function layoutContactRows(items: ContactItem[]): ContactItem[][] {
+  const rows: ContactItem[][] = [];
+  let index = 0;
+  while (index < items.length) {
+    const first = items[index];
+    const second = items[index + 1];
+    if (second && fitsContactColumn(first, 0) && fitsContactColumn(second, 1)) {
+      rows.push([first, second]);
+      index += 2;
+    } else {
+      rows.push([first]);
+      index += 1;
+    }
+  }
+  return rows;
+}
+
+/** Full chip width given the width of its label. */
+export function chipWidth(labelWidth: number): number {
+  return (
+    labelWidth + METRICS.chipPaddingX * 2 + METRICS.chipDotSpace + METRICS.chipBorder * 2
+  );
+}
+
+const MAX_CHIPS_PER_ROW = 3;
+
+/**
+ * Chips are chunked into explicit rows rather than left to wrap: a table
+ * row is the only layout primitive that wraps predictably in Word, which
+ * has no concept of flex-wrap. A row closes at three chips or when the next
+ * one would overflow the column, whichever comes first.
+ */
+export function layoutChipRows(links: SignatureLink[]): SignatureLink[][] {
+  const rows: SignatureLink[][] = [];
+  let used = 0;
+  for (const link of links) {
+    const width = chipWidth(estimateTextWidth(link.label, "chip"));
+    const row = rows[rows.length - 1];
+    if (
+      row &&
+      row.length < MAX_CHIPS_PER_ROW &&
+      used + METRICS.chipRowGap + width <= DETAILS_COLUMN_WIDTH
+    ) {
+      row.push(link);
+      used += METRICS.chipRowGap + width;
+    } else {
+      rows.push([link]);
+      used = width;
+    }
+  }
+  return rows;
+}
+
 /** http(s) is fine anywhere; data: images work outside Gmail (see the UI note). */
 export function isSafeImageSrc(value: string): boolean {
   return (
@@ -425,6 +538,17 @@ export function clampLogoWidth(value: number): number {
   return Math.max(MIN_LOGO_WIDTH, Math.min(MAX_LOGO_WIDTH, Math.round(value)));
 }
 
+/**
+ * The brand column grows to hold a logo wider than its default, widening
+ * the whole signature rather than shrinking the logo or the text. Pass null
+ * when there is no logo: a text wordmark has nothing to make room for.
+ */
+export function brandColumnWidth(logoWidth: number | null): number {
+  return logoWidth === null
+    ? BRAND_COLUMN_WIDTH
+    : Math.max(BRAND_COLUMN_WIDTH, clampLogoWidth(logoWidth));
+}
+
 const TABLE_OPEN =
   '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">';
 
@@ -436,16 +560,9 @@ const TABLE_OPEN =
 const CHIP_TABLE_OPEN =
   '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:0;">';
 
-const CONTACT_GRID_GAP = METRICS.contactGridGap;
-/** Narrower left column: phone/email are short, addresses need the room. */
-const CONTACT_COLUMN_WIDTHS = [
-  248,
-  DETAILS_COLUMN_WIDTH - 248 - CONTACT_GRID_GAP,
-] as const;
-
 function fieldLabel(text: string, palette: Palette): string {
-  const { size, line, tracking } = TYPE.label;
-  return `<div style="font-family:${FONT_STACK};font-size:${size}px;line-height:${line}px;letter-spacing:${tracking}px;text-transform:uppercase;color:${palette.label};padding-bottom:${METRICS.labelGap}px;">${escapeHtml(text.toUpperCase())}</div>`;
+  const { size, line, tracking, weight } = TYPE.label;
+  return `<div style="font-family:${FONT_STACK};font-size:${size}px;line-height:${line}px;font-weight:${weight};letter-spacing:${tracking}px;text-transform:uppercase;color:${palette.label};padding-bottom:${METRICS.labelGap}px;">${escapeHtml(text.toUpperCase())}</div>`;
 }
 
 function contactCell(item: ContactItem, palette: Palette): string {
@@ -460,19 +577,19 @@ function contactCell(item: ContactItem, palette: Palette): string {
 
   return [
     fieldLabel(item.label, palette),
-    `<div style="font-family:${FONT_STACK};font-size:${TYPE.value.size}px;line-height:${TYPE.value.line}px;color:${palette.text};${nowrap}">${text}</div>`,
+    `<div style="font-family:${FONT_STACK};font-size:${TYPE.value.size}px;line-height:${TYPE.value.line}px;font-weight:${TYPE.value.weight};color:${palette.text};${nowrap}">${text}</div>`,
   ].join("");
 }
 
-function contactGrid(items: ContactItem[], palette: Palette, hasChipsBelow: boolean): string {
+function contactGrid(items: ContactItem[], palette: Palette): string {
   if (items.length === 0) return "";
 
-  const rows: string[] = [];
-  for (let index = 0; index < items.length; index += 2) {
-    const pair = items.slice(index, index + 2);
+  const contactRows = layoutContactRows(items);
+  const rows = contactRows.map((pair, rowIndex) => {
     // Trailing padding on the last row sits inside the vertically centred
-    // cell and would push the whole block visibly off-centre.
-    const below = index + 2 >= items.length && !hasChipsBelow ? 0 : METRICS.contactRowGap;
+    // cell and would push the whole block visibly off-centre. The chips
+    // bring their own gap, as they do in the PNG.
+    const below = rowIndex === contactRows.length - 1 ? 0 : METRICS.contactRowGap;
     // Each column is pinned to a width. Left to auto-size, a long address
     // line grows its cell until the signature is wider than the card
     // meant to contain it.
@@ -480,10 +597,7 @@ function contactGrid(items: ContactItem[], palette: Palette, hasChipsBelow: bool
       // Alone on its row, an item gets the whole width rather than the
       // narrow left column with dead space beside it — which is what made
       // a one-line address wrap to three.
-      rows.push(
-        `<tr><td colspan="2" width="${DETAILS_COLUMN_WIDTH}" valign="top" style="width:${DETAILS_COLUMN_WIDTH}px;padding:0 0 ${below}px 0;">${contactCell(pair[0], palette)}</td></tr>`,
-      );
-      continue;
+      return `<tr><td colspan="2" width="${DETAILS_COLUMN_WIDTH}" valign="top" style="width:${DETAILS_COLUMN_WIDTH}px;padding:0 0 ${below}px 0;">${contactCell(pair[0], palette)}</td></tr>`;
     }
 
     const cells = pair.map((item, column) => {
@@ -491,8 +605,8 @@ function contactGrid(items: ContactItem[], palette: Palette, hasChipsBelow: bool
       const gap = column === 0 ? CONTACT_GRID_GAP : 0;
       return `<td width="${width}" valign="top" style="width:${width}px;padding:0 ${gap}px ${below}px 0;">${contactCell(item, palette)}</td>`;
     });
-    rows.push(`<tr>${cells.join("")}</tr>`);
-  }
+    return `<tr>${cells.join("")}</tr>`;
+  });
 
   return `${TABLE_OPEN}${rows.join("")}</table>`;
 }
@@ -503,7 +617,7 @@ function linkChip(link: SignatureLink, palette: Palette): string {
     "<tr>",
     // The 1px border keeps the chip legible even where the fill is nearly
     // the card colour, e.g. a very light background.
-    `<td style="background-color:${palette.surface};border:1px solid ${palette.surfaceBorder};border-radius:${METRICS.chipRadius}px;padding:${METRICS.chipPaddingY}px ${METRICS.chipPaddingX}px;font-family:${FONT_STACK};font-size:${TYPE.chip.size}px;line-height:${TYPE.chip.line}px;color:${palette.text};white-space:nowrap;">`,
+    `<td style="background-color:${palette.surface};border:1px solid ${palette.surfaceBorder};border-radius:${METRICS.chipRadius}px;padding:${METRICS.chipPaddingY}px ${METRICS.chipPaddingX}px;font-family:${FONT_STACK};font-size:${TYPE.chip.size}px;line-height:${TYPE.chip.line}px;font-weight:${TYPE.chip.weight};color:${palette.text};white-space:nowrap;">`,
     `<span style="color:${palette.accent};font-size:${TYPE.chip.size - 2}px;">&#9679;</span>&nbsp;`,
     `<a href="${escapeHtml(link.href)}" style="color:${palette.text};text-decoration:none;">${escapeHtml(link.label)}</a>`,
     "</td>",
@@ -512,22 +626,19 @@ function linkChip(link: SignatureLink, palette: Palette): string {
   ].join("");
 }
 
-/**
- * Chips are chunked into rows of three rather than left to wrap: a table
- * row is the only layout primitive that wraps predictably in Word, which
- * has no concept of flex-wrap.
- */
 function linkChips(links: SignatureLink[], palette: Palette): string {
   if (links.length === 0) return "";
 
-  const rows: string[] = [];
-  for (let index = 0; index < links.length; index += 3) {
-    const below = index + 3 >= links.length ? 0 : METRICS.chipRowGap;
-    const cells = links
-      .slice(index, index + 3)
-      .map((link) => `<td style="padding:0 ${METRICS.chipRowGap}px ${below}px 0;">${linkChip(link, palette)}</td>`);
-    rows.push(`<tr>${cells.join("")}</tr>`);
-  }
+  const chipRows = layoutChipRows(links);
+  const rows = chipRows.map((row, rowIndex) => {
+    const below = rowIndex === chipRows.length - 1 ? 0 : METRICS.chipRowGap;
+    const cells = row
+      .map((link) => `<td style="padding:0 ${METRICS.chipRowGap}px ${below}px 0;">${linkChip(link, palette)}</td>`)
+      .join("");
+    // Each row gets its own table so a wide chip in one row can't stretch
+    // the column it shares with the row above.
+    return `<tr><td style="padding:0;">${TABLE_OPEN}<tr>${cells}</tr></table></td></tr>`;
+  });
 
   return `<div style="padding-top:${METRICS.chipsGap}px;">${TABLE_OPEN}${rows.join("")}</table></div>`;
 }
@@ -539,20 +650,20 @@ function brandColumn(data: SignatureData, palette: Palette): string {
   const tagline = data.tagline.trim();
 
   const mark = logoSrc
-    ? `<img src="${escapeHtml(logoSrc)}" alt="${escapeHtml(company || "Logo")}" width="${width}" style="display:block;border:0;outline:none;text-decoration:none;width:${width}px;max-width:100%;height:auto;" />`
+    ? `<img src="${escapeHtml(logoSrc)}" alt="${escapeHtml(company || "Logo")}" width="${width}" style="display:block;margin:0 auto;border:0;outline:none;text-decoration:none;width:${width}px;max-width:100%;height:auto;" />`
     : company
-      ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.company.size}px;line-height:${TYPE.company.line}px;font-weight:700;letter-spacing:${TYPE.company.tracking}px;color:${palette.text};">${escapeHtml(company)}</div>`
+      ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.company.size}px;line-height:${TYPE.company.line}px;font-weight:${TYPE.company.weight};letter-spacing:${TYPE.company.tracking}px;color:${palette.text};">${escapeHtml(company)}</div>`
       : "";
 
   // A hairline under the wordmark, tinted toward the accent. Gives the
   // column a baseline to sit on when there is no logo artwork to anchor it.
   const rule =
     mark && tagline
-      ? `<div style="padding:${METRICS.ruleGapAbove}px 0 ${METRICS.ruleGapBelow}px 0;">${TABLE_OPEN}<tr><td width="${METRICS.ruleWidth}" height="2" style="width:${METRICS.ruleWidth}px;height:2px;background-color:${palette.accent};font-size:1px;line-height:1px;">&nbsp;</td></tr></table></div>`
+      ? `<div style="padding:${METRICS.ruleGapAbove}px 0 ${METRICS.ruleGapBelow}px 0;">${TABLE_OPEN.replace("<table ", '<table align="center" ')}<tr><td width="${METRICS.ruleWidth}" height="2" style="width:${METRICS.ruleWidth}px;height:2px;background-color:${palette.accent};font-size:1px;line-height:1px;">&nbsp;</td></tr></table></div>`
       : "";
 
   const taglineBlock = tagline
-    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.tagline.size}px;line-height:${TYPE.tagline.line}px;letter-spacing:${TYPE.tagline.tracking}px;text-transform:uppercase;color:${palette.muted};${rule ? "" : `padding-top:${METRICS.taglineGap}px;`}">${escapeHtml(tagline.toUpperCase())}</div>`
+    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.tagline.size}px;line-height:${TYPE.tagline.line}px;font-weight:${TYPE.tagline.weight};letter-spacing:${TYPE.tagline.tracking}px;text-transform:uppercase;text-align:center;text-wrap:balance;color:${palette.muted};${rule ? "" : `padding-top:${METRICS.taglineGap}px;`}">${escapeHtml(tagline.toUpperCase())}</div>`
     : "";
 
   return `${mark}${rule}${taglineBlock}`;
@@ -563,14 +674,14 @@ function detailsColumn(data: SignatureData, palette: Palette): string {
   const role = data.role.trim();
 
   const nameBlock = name
-    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.name.size}px;line-height:${TYPE.name.line}px;font-weight:700;letter-spacing:${TYPE.name.tracking}px;color:${palette.text};">${escapeHtml(name)}</div>`
+    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.name.size}px;line-height:${TYPE.name.line}px;font-weight:${TYPE.name.weight};letter-spacing:${TYPE.name.tracking}px;color:${palette.text};">${escapeHtml(name)}</div>`
     : "";
   const roleBlock = role
-    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.role.size}px;line-height:${TYPE.role.line}px;letter-spacing:${TYPE.role.tracking}px;text-transform:uppercase;font-weight:600;color:${palette.accent};padding-top:${METRICS.roleGap}px;">${escapeHtml(role.toUpperCase())}</div>`
+    ? `<div style="font-family:${FONT_STACK};font-size:${TYPE.role.size}px;line-height:${TYPE.role.line}px;letter-spacing:${TYPE.role.tracking}px;text-transform:uppercase;font-weight:${TYPE.role.weight};color:${palette.accent};padding-top:${METRICS.roleGap}px;">${escapeHtml(role.toUpperCase())}</div>`
     : "";
 
   const links = parseLinks(data.links);
-  const contacts = contactGrid(deriveContactItems(data), palette, links.length > 0);
+  const contacts = contactGrid(deriveContactItems(data), palette);
   const contactsBlock = contacts
     ? `<div style="padding-top:${nameBlock || roleBlock ? METRICS.contactsGap : 0}px;">${contacts}</div>`
     : "";
@@ -622,6 +733,7 @@ export function buildSignatureHtml(
     mode === "boxed"
       ? `${cardBackground(palette)}border-radius:${METRICS.cardRadius}px;padding:${METRICS.cardPaddingY}px ${METRICS.cardPaddingX}px;`
       : "padding:0;";
+  const brandWidth = brandColumnWidth(resolveLogoSrc(data) ? data.logoWidth : null);
 
   return [
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:${FONT_STACK};">`,
@@ -632,7 +744,7 @@ export function buildSignatureHtml(
     // Both columns carry an explicit width. Without one, mail clients
     // (and the preview container) collapse the table to whatever space
     // happens to be available, which squeezes the contact grid.
-    `<td width="${BRAND_COLUMN_WIDTH}" valign="middle" align="center" style="width:${BRAND_COLUMN_WIDTH}px;padding-right:${METRICS.columnGap}px;">${brandColumn(data, palette)}</td>`,
+    `<td width="${brandWidth}" valign="middle" align="center" style="width:${brandWidth}px;padding-right:${METRICS.columnGap}px;">${brandColumn(data, palette)}</td>`,
     dividerCell(palette),
     `<td width="${DETAILS_COLUMN_WIDTH}" valign="middle" style="width:${DETAILS_COLUMN_WIDTH}px;padding-left:${METRICS.columnGap}px;">${detailsColumn(data, palette)}</td>`,
     "</tr>",

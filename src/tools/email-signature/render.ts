@@ -15,8 +15,15 @@
 import {
   type BackdropMode,
   BRAND_COLUMN_WIDTH,
+  brandColumnWidth,
+  chipWidth,
   clampLogoWidth,
+  CONTACT_COLUMN_WIDTHS,
   deriveContactItems,
+  DETAILS_COLUMN_WIDTH,
+  estimateTextWidth,
+  layoutChipRows,
+  layoutContactRows,
   METRICS,
   mixHex,
   parseLinks,
@@ -26,6 +33,7 @@ import {
   type Palette,
   type SignatureData,
   type SignatureLink,
+  type TypeStyle,
 } from "./signature";
 
 export { BRAND_COLUMN_WIDTH };
@@ -36,8 +44,13 @@ export { BRAND_COLUMN_WIDTH };
  * renderSignatureBlob instead. Drawing a wider canvas at the same font
  * sizes is what made every line except the name unreadable in the export.
  */
-export const CANVAS_WIDTH = SIGNATURE_WIDTH + 24 * 2;
-export const OUTER_MARGIN = 24;
+/**
+ * No margin around the card. It was transparent, so it looked like empty
+ * space, but it still counted toward the image's width: a client fitting
+ * the image to its column shrank the card further to make room for it.
+ */
+export const OUTER_MARGIN = 0;
+export const CANVAS_WIDTH = SIGNATURE_WIDTH + OUTER_MARGIN * 2;
 export const CARD_RADIUS = METRICS.cardRadius;
 export const CARD_PADDING_X = METRICS.cardPaddingX;
 export const CARD_PADDING_Y = METRICS.cardPaddingY;
@@ -92,6 +105,72 @@ export interface SignatureLayout {
   logoHeight: number;
   contacts: ContactItem[];
   links: SignatureLink[];
+  /** Everything below is already wrapped to fit its column. */
+  nameLines: string[];
+  roleLines: string[];
+  taglineLines: string[];
+  contactRows: ContactItem[][];
+  chipRows: SignatureLink[][];
+}
+
+/**
+ * Width of a line of text in a given style. Canvas has no text wrapping of
+ * its own, so the layout has to measure. Injected so the geometry stays
+ * pure: tests get the estimate, the export gets the real font.
+ */
+export type TextMeasure = (text: string, style: TypeStyle) => number;
+
+/** Greedy word wrap. A single word wider than the limit keeps its own line. */
+export function wrapText(
+  text: string,
+  maxWidth: number,
+  measure: (line: string) => number,
+): string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && measure(candidate) > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/**
+ * Same line count as wrapText, but evened out so a centred tagline doesn't
+ * end on a lone word. Canvas counterpart of the HTML's `text-wrap:balance`.
+ */
+export function wrapBalanced(
+  text: string,
+  maxWidth: number,
+  measure: (line: string) => number,
+): string[] {
+  const greedy = wrapText(text, maxWidth, measure);
+  if (greedy.length < 2) return greedy;
+
+  let low = 0;
+  let high = maxWidth;
+  for (let step = 0; step < 10; step += 1) {
+    const middle = (low + high) / 2;
+    if (wrapText(text, middle, measure).length <= greedy.length) high = middle;
+    else low = middle;
+  }
+  return wrapText(text, high, measure);
+}
+
+/** Full image width: boxed includes the card's padding, bare hugs the content. */
+export function signatureCanvasWidth(
+  mode: BackdropMode = "boxed",
+  brandWidth: number = BRAND_COLUMN_WIDTH,
+): number {
+  const padX = mode === "boxed" ? CARD_PADDING_X : 2;
+  const margin = mode === "boxed" ? OUTER_MARGIN : 0;
+  return (margin + padX) * 2 + brandWidth + COLUMN_GUTTER + DETAILS_COLUMN_WIDTH;
 }
 
 /** One captioned contact block: label line + its value lines. */
@@ -99,17 +178,17 @@ function contactItemHeight(item: ContactItem): number {
   return LABEL_LINE + LABEL_GAP + item.lines.length * CONTACT_LINE;
 }
 
-function contactRowHeights(contacts: ContactItem[]): number[] {
-  const heights: number[] = [];
-  for (let index = 0; index < contacts.length; index += 2) {
-    const pair = contacts.slice(index, index + 2);
-    heights.push(Math.max(...pair.map(contactItemHeight)));
-  }
-  return heights;
+function fontFor(style: TypeStyle): string {
+  return `${TYPE[style].weight} ${TYPE[style].size}px ${CANVAS_FONT}`;
 }
 
-function chipRowCount(links: SignatureLink[]): number {
-  return Math.ceil(links.length / 3);
+/**
+ * Canvas's "top" baseline sits at the top of the em box, while CSS centres
+ * text inside its line-height. Without this offset every line in the PNG
+ * rides high compared with the same line in the HTML.
+ */
+function textTop(y: number, style: TypeStyle): number {
+  return y + (TYPE[style].line - TYPE[style].size) / 2;
 }
 
 /**
@@ -121,14 +200,30 @@ export function computeSignatureLayout(
   data: SignatureData,
   logoAspect: number | null,
   mode: BackdropMode = "boxed",
+  measure: TextMeasure = estimateTextWidth,
 ): SignatureLayout {
   // Bare mode has no card to pad, so the bitmap hugs the content with
   // only a hairline of breathing room for antialiasing.
   const padX = mode === "boxed" ? CARD_PADDING_X : 2;
   const padY = mode === "boxed" ? CARD_PADDING_Y : 2;
   const margin = mode === "boxed" ? OUTER_MARGIN : 0;
+  const brandWidth = brandColumnWidth(logoAspect === null ? null : data.logoWidth);
+  const width = signatureCanvasWidth(mode, brandWidth);
   const contacts = deriveContactItems(data);
   const links = parseLinks(data.links);
+
+  const wrapValue = (item: ContactItem, maxWidth: number): ContactItem => ({
+    ...item,
+    lines: item.lines.flatMap((line) =>
+      wrapText(line, maxWidth, (text) => measure(text, "value")),
+    ),
+  });
+  const contactRows = layoutContactRows(contacts).map((row) =>
+    row.map((item, column) =>
+      wrapValue(item, row.length === 1 ? DETAILS_COLUMN_WIDTH : CONTACT_COLUMN_WIDTHS[column]),
+    ),
+  );
+  const chipRows = layoutChipRows(links);
 
   const logoWidth = clampLogoWidth(data.logoWidth);
   const hasLogo = logoAspect !== null;
@@ -138,46 +233,56 @@ export function computeSignatureLayout(
 
   const hasCompany = data.company.trim().length > 0;
   const markHeight = hasLogo ? logoHeight : hasCompany ? FALLBACK_MARK_LINE : 0;
-  const tagline = data.tagline.trim().length > 0;
-  const hasRule = markHeight > 0 && tagline;
-  const taglineHeight = tagline ? (hasRule ? RULE_BLOCK : TAGLINE_GAP) + TAGLINE_LINE : 0;
+  const taglineLines = wrapBalanced(data.tagline.trim().toUpperCase(), brandWidth, (text) =>
+    measure(text, "tagline"),
+  );
+  const hasTagline = taglineLines.length > 0;
+  const hasRule = markHeight > 0 && hasTagline;
+  const taglineHeight = hasTagline
+    ? (hasRule ? RULE_BLOCK : TAGLINE_GAP) + taglineLines.length * TAGLINE_LINE
+    : 0;
   const brandHeight = markHeight + taglineHeight;
 
-  let detailsHeight = 0;
-  const hasName = data.fullName.trim().length > 0;
-  const hasRole = data.role.trim().length > 0;
-  if (hasName) detailsHeight += NAME_LINE;
-  if (hasRole) detailsHeight += ROLE_GAP + ROLE_LINE;
+  const nameLines = wrapText(data.fullName.trim(), DETAILS_COLUMN_WIDTH, (text) =>
+    measure(text, "name"),
+  );
+  const roleLines = wrapText(data.role.trim().toUpperCase(), DETAILS_COLUMN_WIDTH, (text) =>
+    measure(text, "role"),
+  );
 
-  const rowHeights = contactRowHeights(contacts);
-  if (contacts.length > 0) {
-    const gaps = (rowHeights.length - 1) * CONTACT_ROW_GAP;
+  let detailsHeight = nameLines.length * NAME_LINE;
+  if (roleLines.length > 0) detailsHeight += ROLE_GAP + roleLines.length * ROLE_LINE;
+
+  if (contactRows.length > 0) {
+    const rowHeights = contactRows.map((row) => Math.max(...row.map(contactItemHeight)));
     detailsHeight +=
-      (hasName || hasRole ? CONTACT_GAP : 0) + rowHeights.reduce((sum, h) => sum + h, 0) + gaps;
+      (nameLines.length > 0 || roleLines.length > 0 ? CONTACT_GAP : 0) +
+      rowHeights.reduce((sum, h) => sum + h, 0) +
+      (rowHeights.length - 1) * CONTACT_ROW_GAP;
   }
-  if (links.length > 0) {
+  if (chipRows.length > 0) {
     detailsHeight +=
-      CHIPS_GAP + chipRowCount(links) * CHIP_HEIGHT + (chipRowCount(links) - 1) * CHIP_ROW_GAP;
+      CHIPS_GAP + chipRows.length * CHIP_HEIGHT + (chipRows.length - 1) * CHIP_ROW_GAP;
   }
 
   const contentHeight = Math.max(brandHeight, detailsHeight, mode === "boxed" ? 140 : 1);
   const cardHeight = contentHeight + padY * 2;
-  const detailsX = margin + padX + BRAND_COLUMN_WIDTH + COLUMN_GUTTER;
+  const detailsX = margin + padX + brandWidth + COLUMN_GUTTER;
 
   return {
-    width: CANVAS_WIDTH,
+    width,
     height: cardHeight + margin * 2,
     cardX: margin,
     cardY: margin,
-    cardWidth: CANVAS_WIDTH - margin * 2,
+    cardWidth: width - margin * 2,
     cardHeight,
-    brandCenterX: margin + padX + BRAND_COLUMN_WIDTH / 2,
+    brandCenterX: margin + padX + brandWidth / 2,
     // Exactly where the HTML puts it: one column gap past the brand
     // column. Half the gutter would be 1px off, since the gutter also
     // contains the divider itself.
-    dividerX: margin + padX + BRAND_COLUMN_WIDTH + METRICS.columnGap,
+    dividerX: margin + padX + brandWidth + METRICS.columnGap,
     detailsX,
-    detailsWidth: CANVAS_WIDTH - margin - padX - detailsX,
+    detailsWidth: DETAILS_COLUMN_WIDTH,
     contentTop: margin + padY,
     contentHeight,
     brandHeight,
@@ -186,6 +291,11 @@ export function computeSignatureLayout(
     logoHeight,
     contacts,
     links,
+    nameLines,
+    roleLines,
+    taglineLines,
+    contactRows,
+    chipRows,
   };
 }
 
@@ -240,8 +350,8 @@ function drawLabel(
   y: number,
 ): void {
   ctx.fillStyle = palette.label;
-  ctx.font = `600 ${TYPE.label.size}px ${CANVAS_FONT}`;
-  drawTracked(ctx, text.toUpperCase(), x, y, TYPE.label.tracking);
+  ctx.font = fontFor("label");
+  drawTracked(ctx, text.toUpperCase(), x, textTop(y, "label"), TYPE.label.tracking);
 }
 
 /** The coloured card: flat fill, then the two corner glows, clipped. */
@@ -287,7 +397,7 @@ function drawDivider(
   layout: SignatureLayout,
   mode: BackdropMode,
 ): void {
-  const inset = mode === "boxed" ? 34 : 6;
+  const inset = mode === "boxed" ? METRICS.cardPaddingY : 6;
   const top = layout.cardY + inset;
   const bottom = layout.cardY + layout.cardHeight - inset;
   if (bottom <= top) return;
@@ -325,7 +435,6 @@ export function drawSignature(
   // ---- Brand column, centred against the taller of the two columns ----
   let brandY = layout.contentTop + (layout.contentHeight - layout.brandHeight) / 2;
   const company = data.company.trim();
-  const tagline = data.tagline.trim();
   let hasMark = false;
 
   if (logo) {
@@ -340,15 +449,15 @@ export function drawSignature(
     hasMark = true;
   } else if (company) {
     ctx.fillStyle = palette.text;
-    ctx.font = `700 ${TYPE.company.size}px ${CANVAS_FONT}`;
+    ctx.font = fontFor("company");
     ctx.textAlign = "center";
-    ctx.fillText(company, layout.brandCenterX, brandY);
+    ctx.fillText(company, layout.brandCenterX, textTop(brandY, "company"));
     ctx.textAlign = "left";
     brandY += FALLBACK_MARK_LINE;
     hasMark = true;
   }
 
-  if (tagline) {
+  if (layout.taglineLines.length > 0) {
     if (hasMark) {
       // Accent hairline between wordmark and tagline.
       ctx.fillStyle = palette.accent;
@@ -363,80 +472,85 @@ export function drawSignature(
       brandY += TAGLINE_GAP;
     }
     ctx.fillStyle = palette.muted;
-    ctx.font = `${TYPE.tagline.size}px ${CANVAS_FONT}`;
-    const upper = tagline.toUpperCase();
+    ctx.font = fontFor("tagline");
     const track = TYPE.tagline.tracking;
-    drawTracked(ctx, upper, layout.brandCenterX - trackedWidth(ctx, upper, track) / 2, brandY, track);
+    for (const line of layout.taglineLines) {
+      const lineX = layout.brandCenterX - trackedWidth(ctx, line, track) / 2;
+      drawTracked(ctx, line, lineX, textTop(brandY, "tagline"), track);
+      brandY += TAGLINE_LINE;
+    }
   }
 
   // ---- Details column ----
   let y = layout.contentTop + (layout.contentHeight - layout.detailsHeight) / 2;
-  const name = data.fullName.trim();
-  const role = data.role.trim();
 
-  if (name) {
-    ctx.fillStyle = palette.text;
-    ctx.font = `700 ${TYPE.name.size}px ${CANVAS_FONT}`;
-    ctx.fillText(name, layout.detailsX, y);
+  ctx.fillStyle = palette.text;
+  ctx.font = fontFor("name");
+  for (const line of layout.nameLines) {
+    ctx.fillText(line, layout.detailsX, textTop(y, "name"));
     y += NAME_LINE;
   }
 
-  if (role) {
+  if (layout.roleLines.length > 0) {
     y += ROLE_GAP;
     ctx.fillStyle = palette.accent;
-    ctx.font = `600 ${TYPE.role.size}px ${CANVAS_FONT}`;
-    drawTracked(ctx, role.toUpperCase(), layout.detailsX, y, TYPE.role.tracking);
-    y += ROLE_LINE;
+    ctx.font = fontFor("role");
+    for (const line of layout.roleLines) {
+      drawTracked(ctx, line, layout.detailsX, textTop(y, "role"), TYPE.role.tracking);
+      y += ROLE_LINE;
+    }
   }
 
-  if (layout.contacts.length > 0) {
-    if (name || role) y += CONTACT_GAP;
-    const columnWidth = (layout.detailsWidth - METRICS.contactGridGap) / 2;
+  if (layout.contactRows.length > 0) {
+    if (layout.nameLines.length > 0 || layout.roleLines.length > 0) y += CONTACT_GAP;
 
-    for (let index = 0; index < layout.contacts.length; index += 2) {
-      const pair = layout.contacts.slice(index, index + 2);
-
-      pair.forEach((item, column) => {
-        const columnX = layout.detailsX + column * (columnWidth + METRICS.contactGridGap);
+    for (const row of layout.contactRows) {
+      row.forEach((item, column) => {
+        const columnX =
+          layout.detailsX + (column === 0 ? 0 : CONTACT_COLUMN_WIDTHS[0] + METRICS.contactGridGap);
         drawLabel(ctx, palette, item.label, columnX, y);
 
         ctx.fillStyle = palette.text;
-        ctx.font = `${TYPE.value.size}px ${CANVAS_FONT}`;
+        ctx.font = fontFor("value");
         item.lines.forEach((line, lineIndex) => {
-          ctx.fillText(line, columnX, y + LABEL_LINE + LABEL_GAP + lineIndex * CONTACT_LINE);
+          const lineY = y + LABEL_LINE + LABEL_GAP + lineIndex * CONTACT_LINE;
+          ctx.fillText(line, columnX, textTop(lineY, "value"));
         });
       });
 
-      y += Math.max(...pair.map(contactItemHeight)) + CONTACT_ROW_GAP;
+      y += Math.max(...row.map(contactItemHeight)) + CONTACT_ROW_GAP;
     }
     y -= CONTACT_ROW_GAP;
   }
 
-  if (layout.links.length > 0) {
+  if (layout.chipRows.length > 0) {
     y += CHIPS_GAP;
+    ctx.font = fontFor("chip");
+    const chipInset = METRICS.chipBorder + METRICS.chipPaddingX;
+    const chipTextY = (CHIP_HEIGHT - TYPE.chip.size) / 2;
 
-    for (let index = 0; index < layout.links.length; index += 3) {
+    for (const row of layout.chipRows) {
       let chipX = layout.detailsX;
-      for (const link of layout.links.slice(index, index + 3)) {
-        ctx.font = `${TYPE.chip.size}px ${CANVAS_FONT}`;
-        const chipWidth = ctx.measureText(link.label).width + METRICS.chipPaddingX * 2 + 22;
+      for (const link of row) {
+        const width = chipWidth(ctx.measureText(link.label).width);
 
-        roundRectPath(ctx, chipX + 0.5, y + 0.5, chipWidth, CHIP_HEIGHT, CHIP_HEIGHT / 2);
+        // Inset by half a pixel so the 1px stroke lands on whole pixels.
+        roundRectPath(ctx, chipX + 0.5, y + 0.5, width - 1, CHIP_HEIGHT - 1, CHIP_HEIGHT / 2);
         ctx.fillStyle = palette.surface;
         ctx.fill();
         ctx.strokeStyle = palette.surfaceBorder;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = METRICS.chipBorder;
         ctx.stroke();
 
         ctx.fillStyle = palette.accent;
         ctx.beginPath();
-        ctx.arc(chipX + METRICS.chipPaddingX + 3, y + CHIP_HEIGHT / 2, 3.5, 0, Math.PI * 2);
+        ctx.arc(chipX + chipInset + 3, y + CHIP_HEIGHT / 2, 3, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = palette.text;
-        ctx.fillText(link.label, chipX + METRICS.chipPaddingX + 15, y + CHIP_HEIGHT / 2 - TYPE.chip.size / 2 - 1);
+        ctx.fillText(link.label, chipX + chipInset + METRICS.chipDotSpace, y + chipTextY);
 
-        chipX += chipWidth + 10;
+        chipX += width + METRICS.chipRowGap;
       }
       y += CHIP_HEIGHT + CHIP_ROW_GAP;
     }
@@ -467,21 +581,27 @@ export async function renderSignatureBlob(
   mode: BackdropMode = "boxed",
 ): Promise<Blob> {
   const aspect = logo && logo.naturalWidth > 0 ? logo.naturalHeight / logo.naturalWidth : null;
-  const layout = computeSignatureLayout(data, aspect, mode);
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(layout.width * scale);
-  canvas.height = Math.round(layout.height * scale);
-
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
 
+  const layout = computeSignatureLayout(data, aspect, mode, (text, style) => {
+    ctx.font = fontFor(style);
+    const { tracking } = TYPE[style];
+    return tracking > 0 ? trackedWidth(ctx, text, tracking) : ctx.measureText(text).width;
+  });
+
+  // Resizing a canvas resets its context, so this has to precede scale().
+  canvas.width = Math.round(layout.width * scale);
+  canvas.height = Math.round(layout.height * scale);
   ctx.scale(scale, scale);
-  // The margin around the card is transparent by default so the PNG drops
-  // onto any email background. Opting out fills it with a tone close to
-  // the card, for clients that composite transparency badly. Bare mode
-  // has no margin to fill and must stay transparent, or it would paint
-  // back the very box the mode exists to remove.
+
+  // The corners outside the rounded card are transparent by default so the
+  // PNG drops onto any email background. Opting out fills them with a tone
+  // close to the card, for clients that composite transparency badly. Bare
+  // mode must stay transparent, or it would paint back the very box the
+  // mode exists to remove.
   if (!transparent && mode === "boxed") {
     ctx.fillStyle = mixHex(palette.background, palette.text, 0.02);
     ctx.fillRect(0, 0, layout.width, layout.height);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BARE_BACKDROPS,
+  BRAND_COLUMN_WIDTH,
+  brandColumnWidth,
   buildSignatureHtml,
   clampLogoWidth,
   DEFAULT_ACCENT,
@@ -12,15 +14,24 @@ import {
   EMPTY_SIGNATURE,
   EXAMPLE_SIGNATURE,
   escapeHtml,
+  estimateTextWidth,
   isBlank,
   isSafeImageSrc,
+  layoutChipRows,
+  layoutContactRows,
   linkLabel,
+  MAX_LOGO_WIDTH,
+  MAX_SIGNATURE_WIDTH,
+  METRICS,
+  MIN_LOGO_WIDTH,
   mixHex,
   normalizeHex,
   normalizeLinkHref,
   parseLinks,
   readableTextColor,
+  relativeLuminance,
   resolveLogoSrc,
+  SIGNATURE_WIDTH,
   type SignatureData,
 } from "../signature";
 
@@ -84,6 +95,24 @@ describe("derivePalette", () => {
   it("flips text to dark when the background is light", () => {
     expect(derivePalette("#ffffff", DEFAULT_ACCENT).text).toBe("#101010");
   });
+
+  it.each(["#141a24", "#0a2e2c", "#000000", "#ffffff", "#f4f4f5", "#1e3a8a"])(
+    "keeps the smallest type well above AA contrast on %s",
+    (background) => {
+      const palette = derivePalette(background, DEFAULT_ACCENT);
+      const contrast = (tone: string) => {
+        const [high, low] = [relativeLuminance(tone), relativeLuminance(background)].sort(
+          (a, b) => b - a,
+        );
+        return (high + 0.05) / (low + 0.05);
+      };
+
+      // Field labels and the tagline are the smallest text on the card, so
+      // merely passing 4.5:1 isn't enough to read comfortably.
+      expect(contrast(palette.label)).toBeGreaterThanOrEqual(6);
+      expect(contrast(palette.muted)).toBeGreaterThanOrEqual(6);
+    },
+  );
 
   it("falls back to the defaults for invalid input rather than emitting junk", () => {
     const palette = derivePalette("not-a-colour", "also-not");
@@ -181,9 +210,9 @@ describe("logo source resolution", () => {
 
 describe("clampLogoWidth", () => {
   it("clamps to the supported range and survives NaN", () => {
-    expect(clampLogoWidth(10)).toBe(80);
-    expect(clampLogoWidth(9999)).toBe(360);
-    expect(clampLogoWidth(240)).toBe(240);
+    expect(clampLogoWidth(10)).toBe(MIN_LOGO_WIDTH);
+    expect(clampLogoWidth(9999)).toBe(MAX_LOGO_WIDTH);
+    expect(clampLogoWidth(120)).toBe(120);
     expect(clampLogoWidth(Number.NaN)).toBe(DEFAULT_LOGO_WIDTH);
   });
 });
@@ -194,8 +223,8 @@ describe("backdrop modes", () => {
   it("paints a rounded, padded, gradient card in boxed mode", () => {
     const html = buildSignatureHtml(EXAMPLE_SIGNATURE, palette, "boxed");
 
-    expect(html).toContain("border-radius:26px");
-    expect(html).toContain("padding:34px 42px");
+    expect(html).toContain(`border-radius:${METRICS.cardRadius}px`);
+    expect(html).toContain(`padding:${METRICS.cardPaddingY}px ${METRICS.cardPaddingX}px`);
     expect(html).toContain(`background-color:${DEFAULT_BACKGROUND}`);
     expect(html).toContain("radial-gradient");
   });
@@ -204,8 +233,8 @@ describe("backdrop modes", () => {
     const html = buildSignatureHtml(EXAMPLE_SIGNATURE, palette, "bare");
 
     expect(html).toContain("<td style=\"padding:0;\">");
-    expect(html).not.toContain("border-radius:26px");
-    expect(html).not.toContain("padding:34px 42px");
+    expect(html).not.toContain(`border-radius:${METRICS.cardRadius}px`);
+    expect(html).not.toContain(`padding:${METRICS.cardPaddingY}px ${METRICS.cardPaddingX}px`);
     expect(html).not.toContain("radial-gradient");
   });
 
@@ -353,7 +382,7 @@ describe("buildSignatureHtml", () => {
       withData({ logoUrl: "https://cdn.example.com/logo.png", logoWidth: 9999 }),
       palette,
     );
-    expect(html).toContain('width="360"');
+    expect(html).toContain(`width="${MAX_LOGO_WIDTH}"`);
     expect(html).toContain('src="https://cdn.example.com/logo.png"');
   });
 
@@ -379,7 +408,7 @@ describe("buildSignatureHtml", () => {
 
   it("keeps chips pill-shaped by separating their table's borders", () => {
     const html = buildSignatureHtml(EXAMPLE_SIGNATURE, palette);
-    const chipStyles = [...html.matchAll(/style="([^"]*border-radius:18px[^"]*)"/g)];
+    const chipStyles = [...html.matchAll(/style="([^"]*border-radius:14px[^"]*)"/g)];
 
     expect(chipStyles.length).toBeGreaterThan(0);
     // A bordered cell inside a `border-collapse:collapse` table loses its
@@ -413,23 +442,29 @@ describe("buildSignatureHtml", () => {
 
   it("wraps chips into rows of three so they never rely on flex-wrap", () => {
     const html = buildSignatureHtml(withData({ links: "a.com\nb.com\nc.com\nd.com" }), palette);
-    const chipCells = (html.match(/style="padding:0 10px \d+px 0;"/g) ?? []).length;
+    const gap = METRICS.chipRowGap;
+    const chipCells = html.match(new RegExp(`style="padding:0 ${gap}px \\d+px 0;"`, "g")) ?? [];
 
-    expect(chipCells).toBe(4);
-    // Three chips share the first row's 10px gutter; the fourth starts a
-    // new row and, being last, carries no trailing gap.
-    expect((html.match(/style="padding:0 10px 10px 0;"/g) ?? []).length).toBe(3);
-    expect((html.match(/style="padding:0 10px 0px 0;"/g) ?? []).length).toBe(1);
+    expect(chipCells).toHaveLength(4);
+    // Three chips share the first row's gutter; the fourth starts a new
+    // row and, being last, carries no trailing gap.
+    expect(html.match(new RegExp(`style="padding:0 ${gap}px ${gap}px 0;"`, "g"))).toHaveLength(3);
+    expect(html.match(new RegExp(`style="padding:0 ${gap}px 0px 0;"`, "g"))).toHaveLength(1);
     expect(html).toContain('href="https://d.com/"');
   });
 
   it("leaves no trailing gap below the last block, so the column centres true", () => {
     const withChips = buildSignatureHtml(EXAMPLE_SIGNATURE, palette);
-    expect(withChips).toContain('style="padding:0 10px 0px 0;"');
+    expect(withChips).toContain(`style="padding:0 ${METRICS.chipRowGap}px 0px 0;"`);
 
     // Without links, the last contact row becomes the final block instead.
     const withoutChips = buildSignatureHtml(withData({ links: "" }), palette);
     expect(withoutChips).not.toContain("12px 0;");
+  });
+
+  it("gives the tagline a font weight in the HTML, matching the PNG", () => {
+    const html = buildSignatureHtml(EXAMPLE_SIGNATURE, palette);
+    expect(html).toMatch(/font-weight:500;[^"]*text-transform:uppercase;[^"]*">DESIGN/);
   });
 
   it("only ever writes validated hex colours into style attributes", () => {
@@ -438,5 +473,84 @@ describe("buildSignatureHtml", () => {
     for (const [, colour] of html.matchAll(/(?:background-)?color:([^;"]+)/g)) {
       expect(colour.trim()).toMatch(/^#[0-9a-f]{6}$/);
     }
+  });
+});
+
+describe("a logo bigger than its column", () => {
+  const palette = derivePalette(DEFAULT_BACKGROUND, DEFAULT_ACCENT);
+  const logoUrl = "https://cdn.example.com/logo.png";
+
+  it("leaves the column alone until the logo outgrows it, then grows with it", () => {
+    expect(brandColumnWidth(MIN_LOGO_WIDTH)).toBe(BRAND_COLUMN_WIDTH);
+    expect(brandColumnWidth(BRAND_COLUMN_WIDTH)).toBe(BRAND_COLUMN_WIDTH);
+    expect(brandColumnWidth(BRAND_COLUMN_WIDTH + 40)).toBe(BRAND_COLUMN_WIDTH + 40);
+  });
+
+  it("caps the growth, so width can't be traded for unreadable text", () => {
+    expect(brandColumnWidth(9999)).toBe(MAX_LOGO_WIDTH);
+    expect(
+      SIGNATURE_WIDTH - BRAND_COLUMN_WIDTH + brandColumnWidth(9999),
+    ).toBe(MAX_SIGNATURE_WIDTH);
+    // Squeezed back to the standard 600px, contact lines must stay readable.
+    expect(15 * (SIGNATURE_WIDTH / MAX_SIGNATURE_WIDTH)).toBeGreaterThanOrEqual(11.5);
+  });
+
+  it("widens only the brand column in the HTML", () => {
+    const html = buildSignatureHtml(withData({ logoUrl, logoWidth: 300 }), palette);
+
+    expect(html).toContain('<td width="300" valign="middle" align="center"');
+    expect(html).toContain(`<td width="${DETAILS_COLUMN_WIDTH}" valign="middle"`);
+  });
+
+  it("ignores the logo width when there is no logo to make room for", () => {
+    const html = buildSignatureHtml(
+      withData({ logoUrl: "", logoDataUrl: null, logoWidth: 300 }),
+      palette,
+    );
+
+    expect(html).toContain(`<td width="${BRAND_COLUMN_WIDTH}" valign="middle" align="center"`);
+  });
+});
+
+describe("the 600px layout", () => {
+  it("is designed at the width email actually displays it, absent a big logo", () => {
+    // The regression this guards: at 998px, a client showing the card at
+    // 555px rendered the 11px labels at 6px. No font size survives that.
+    expect(SIGNATURE_WIDTH).toBe(600);
+  });
+
+  it("keeps a typical phone and email side by side", () => {
+    const rows = layoutContactRows(
+      deriveContactItems(
+        withData({ phone: "+50763043239", email: "avega@kuarco.com", address: "Calle 50" }),
+      ),
+    );
+
+    expect(rows.map((row) => row.length)).toEqual([2, 1]);
+  });
+
+  it("stacks a contact that wouldn't fit its column rather than overflowing", () => {
+    const rows = layoutContactRows(
+      deriveContactItems(
+        withData({
+          phone: "+1 555 0142",
+          email: "alexandria.montgomery-rodriguez@example.com",
+          address: "",
+        }),
+      ),
+    );
+
+    expect(rows.map((row) => row.length)).toEqual([1, 1]);
+  });
+
+  it("closes a chip row early when the next chip would overflow the column", () => {
+    const rows = layoutChipRows(parseLinks("kuarco.com/contacto-general\nkuarco.com/portafolio\na.com"));
+
+    expect(rows.map((row) => row.length)).toEqual([1, 2]);
+  });
+
+  it("estimates capitals wider than lowercase, and tracking on top of that", () => {
+    expect(estimateTextWidth("ABC", "value")).toBeGreaterThan(estimateTextWidth("abc", "value"));
+    expect(estimateTextWidth("abc", "role")).toBeGreaterThan(0);
   });
 });

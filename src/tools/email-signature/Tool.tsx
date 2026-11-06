@@ -6,6 +6,8 @@ import {
   type BackdropMode,
   BARE_BACKDROPS,
   type BareSurface,
+  BRAND_COLUMN_WIDTH,
+  brandColumnWidth,
   buildSignatureHtml,
   clampLogoWidth,
   DEFAULT_ACCENT,
@@ -24,6 +26,7 @@ import {
   buildPngFileName,
   loadLogoImage,
   renderSignatureBlob,
+  signatureCanvasWidth,
   triggerDownload,
 } from "./render";
 
@@ -168,6 +171,10 @@ export default function EmailSignatureTool() {
   const logoSrc = resolveLogoSrc(data);
   const usesInlineLogo = logoSrc !== null && logoSrc.startsWith("data:");
   const blank = isBlank(data);
+  const pngWidth = signatureCanvasWidth(
+    mode,
+    brandColumnWidth(logoSrc ? data.logoWidth : null),
+  );
 
   // Feedback is stamped with the signature it described, so any edit
   // retires it by derivation. Clearing it from an effect instead would
@@ -345,7 +352,7 @@ export default function EmailSignatureTool() {
               </button>
               <span className="flex items-center gap-2 text-xs text-foreground/60">
                 {PNG_SCALES.map((option) => (
-                  <label key={option} className="flex items-center gap-1" title={`${option * 1200}px wide`}>
+                  <label key={option} className="flex items-center gap-1" title={`${option * pngWidth}px wide`}>
                     <input
                       type="radio"
                       name="signature-png-scale"
@@ -369,11 +376,13 @@ export default function EmailSignatureTool() {
               ) : null}
             </div>
             <p className="text-xs text-foreground/50">
-              {scale}× exports at {scale * 1200}px wide.
+              {scale}× exports at {scale * pngWidth}px wide. Set it to display at{" "}
+              {pngWidth}px in your mail client: shown any smaller, the text
+              shrinks with it.
               {mode === "boxed"
                 ? transparentMargin
-                  ? " The area around the rounded card stays transparent."
-                  : " The area around the rounded card is filled."
+                  ? " The corners outside the rounded card stay transparent."
+                  : " The corners outside the rounded card are filled."
                 : " No background box, so the PNG is transparent."}
             </p>
           </fieldset>
@@ -598,12 +607,19 @@ export default function EmailSignatureTool() {
           />
         </Field>
 
-        <Field label={`Logo width — ${clampLogoWidth(data.logoWidth)}px`}>
+        <Field
+          label={`Logo width — ${clampLogoWidth(data.logoWidth)}px`}
+          hint={
+            logoSrc && clampLogoWidth(data.logoWidth) > BRAND_COLUMN_WIDTH
+              ? `The signature has widened to ${pngWidth}px to fit the logo. The text stays the same size.`
+              : `Past ${BRAND_COLUMN_WIDTH}px the signature widens to fit the logo. The text stays the same size.`
+          }
+        >
           <input
             type="range"
             min={MIN_LOGO_WIDTH}
             max={MAX_LOGO_WIDTH}
-            step={4}
+            step={2}
             value={clampLogoWidth(data.logoWidth)}
             onChange={(event) => update("logoWidth", Number(event.target.value))}
             className="w-full accent-accent"
